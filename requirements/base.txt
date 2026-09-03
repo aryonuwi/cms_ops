@@ -1,0 +1,7 @@
+# Runtime dependencies shared by every environment.
+Django==6.1
+django-environ==0.14.0
+django-unfold==0.104.1
+asgiref==3.12.1
+sqlparse==0.6.0
+psycopg[binary]==3.3.5

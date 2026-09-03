@@ -1,0 +1,128 @@
+"""Read-side API of the access module.
+
+The one function other modules care about is ``user_can_access`` - the single
+point where menu visibility is decided, so every sidebar entry that opts in
+evaluates by the same rules.
+"""
+
+from __future__ import annotations
+
+from django.contrib.auth.models import AbstractBaseUser, AnonymousUser
+from django.db.models import Q, QuerySet
+
+from .models import Feature, FeatureGrant
+
+
+def get_feature_by_slug(slug: str) -> Feature | None:
+    return Feature.objects.filter(slug=slug).first()
+
+
+def list_features(*, include_inactive: bool = False) -> QuerySet[Feature]:
+    """The feature catalog, active entries only unless told otherwise."""
+    queryset = Feature.objects.all()
+    if not include_inactive:
+        queryset = queryset.filter(is_active=True)
+    return queryset
+
+
+def list_grants(
+    *, feature_slug: str | None = None, grantee_type: str | None = None
+) -> QuerySet[FeatureGrant]:
+    """Grants, optionally narrowed to one feature or grantee type."""
+    queryset = FeatureGrant.objects.select_related("feature", "group")
+    if feature_slug is not None:
+        queryset = queryset.filter(feature__slug=feature_slug)
+    if grantee_type is not None:
+        queryset = queryset.filter(grantee_type=grantee_type)
+    return queryset
+
+
+def user_feature_grants(user: AbstractBaseUser) -> QuerySet[FeatureGrant]:
+    """Every grant that touches ``user`` - via any group or a personal grant.
+
+    Used by the accounts admin to show effective access without importing the
+    user model; grantee types stay symbolic (no raw strings) so a rename can
+    never silently break the filter.
+    """
+    group_ids = list(user.groups.values_list("pk", flat=True))
+    return FeatureGrant.objects.select_related("feature", "group").filter(
+        Q(grantee_type=FeatureGrant.GranteeType.GROUP, group_id__in=group_ids)
+        | Q(grantee_type=FeatureGrant.GranteeType.USER, user_id=user.pk)
+    )
+
+
+def user_can_access(
+    user: AbstractBaseUser | AnonymousUser, feature_slug: str
+) -> bool:
+    """Decide whether ``user`` may see and use the feature ``feature_slug``.
+
+    Precedence, fail-closed at every step:
+
+    * inactive or anonymous user -> ``False``
+    * superuser -> ``True`` (bypasses grants, but not ``required_permission``:
+      superusers hold every permission anyway)
+    * unknown or deactivated feature -> ``False``
+    * personal deny -> ``False``; personal allow -> ``True`` (most specific
+      decision wins, so a personal allow survives a group deny)
+    * group deny -> ``False``; group allow -> ``True``
+    * otherwise -> ``False`` (default deny)
+    """
+    if not getattr(user, "is_active", False):
+        return False
+    if user.is_superuser:
+        return True
+
+    feature = Feature.objects.filter(slug=feature_slug, is_active=True).first()
+    if feature is None:
+        return False
+
+    # Visibility and enforcement must agree: a menu that maps to a Django
+    # permission stays hidden until the user actually holds that permission.
+    if feature.required_permission and not user.has_perm(
+        feature.required_permission
+    ):
+        return False
+
+    group_ids = list(user.groups.values_list("pk", flat=True))
+    grantee_types_and_effects = (
+        FeatureGrant.objects.filter(feature=feature)
+        .filter(
+            Q(grantee_type=FeatureGrant.GranteeType.USER, user_id=user.pk)
+            | Q(grantee_type=FeatureGrant.GranteeType.GROUP, group_id__in=group_ids)
+        )
+        .values_list("grantee_type", "effect")
+    )
+
+    personal_allow = personal_deny = group_allow = group_deny = False
+    for grantee_type, effect in grantee_types_and_effects:
+        if grantee_type == FeatureGrant.GranteeType.USER:
+            if effect == FeatureGrant.Effect.DENY:
+                personal_deny = True
+            else:
+                personal_allow = True
+        else:
+            if effect == FeatureGrant.Effect.DENY:
+                group_deny = True
+            else:
+                group_allow = True
+
+    if personal_deny:
+        return False
+    if personal_allow:
+        return True
+    if group_deny:
+        return False
+    return group_allow
+
+
+def effective_features(user: AbstractBaseUser | AnonymousUser) -> set[str]:
+    """Slugs of every active feature ``user`` can reach.
+
+    Built on top of ``user_can_access`` so bulk checks can never drift from
+    the per-feature decision.
+    """
+    return {
+        slug
+        for slug in list_features().values_list("slug", flat=True)
+        if user_can_access(user, slug)
+    }

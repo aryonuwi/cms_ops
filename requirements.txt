@@ -1,0 +1,7 @@
+# Convenience entrypoint saja. Sumber kebenaran ada di requirements/.
+# Jangan pernah menimpa file ini dengan `pip freeze` - lihat README
+# ("Mengelola dependency").
+#
+#   pip install -r requirements/local.txt        # development
+#   pip install -r requirements/production.txt   # server
+-r requirements/local.txt

@@ -1,0 +1,2 @@
+-r base.txt
+# Local PostgreSQL runs via docker-compose.yml - see README.
