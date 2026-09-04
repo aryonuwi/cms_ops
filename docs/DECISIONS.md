@@ -324,6 +324,41 @@ ubah migrasi lama) yang memetakan balik status ke `is_active`, dan kembalikan
 
 ---
 
+## ADR-014 — Alias publik `cms_ops`, identifier internal tidak berubah
+
+**Tanggal:** 2026-09-04 · **Status:** Accepted
+
+**Konteks.** Project perlu dikenal dengan nama publik `cms_ops` (branding,
+komunikasi, judul panel). Tapi identifier internal sudah terpakai di banyak
+tempat yang masing-masing sudah jadi keputusan tersendiri: package project
+`config` (ADR-001), database & role `ops_views`/`ops_user` di container
+PostgreSQL bersama (ADR-011), folder repo, slug vault knowledge `ops_views`,
+serta nama service/nginx di dokumen deploy. Rename penuh berbiaya tinggi
+(migrasi, systemd, container bersama) dan tidak memberi nilai fungsional.
+
+**Keputusan.** `cms_ops` menjadi **alias** — bukan rename. Yang memakai alias:
+- Tampilan admin: `UNFOLD["SITE_TITLE"]`/`SITE_HEADER`, dibaca dari
+  `DJANGO_SITE_TITLE` (default `"CMS Ops"`) — bisa dioverride per environment
+  tanpa ubah kode.
+- Judul README dan baris identitas AGENTS.md.
+
+Identifier internal **tetap**: package `config`, database `ops_views`,
+role `ops_user`, folder repo `ops_views`, slug vault `ops_views`,
+`DATABASE_APPLICATION_NAME`.
+
+**Konsekuensi.** Ada dua nama untuk satu project: alias publik `cms_ops` dan
+nama internal `ops_views`. Dokumen selalu menyebut hubungan keduanya di satu
+tempat (README + tabel identitas AGENTS.md). Agent berikutnya **jangan**
+menyeragamkan dengan merename package/database/vault — itu membalik ADR-001
+dan/atau ADR-011.
+
+**Cara membalik.** Hapus alias dari README, AGENTS.md, dan default
+`DJANGO_SITE_TITLE` di `base.py`. Kalau rename penuh benar-benar diinginkan,
+buat ADR baru yang secara eksplisit menggantikan ADR-001 dan ADR-011, lalu
+jalankan migrasinya sebagai proyek terpisah — bukan efek samping dari alias.
+
+---
+
 <!--
 Template entri baru:
 

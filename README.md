@@ -1,4 +1,9 @@
-# Ops Views
+# CMS Ops
+
+> Alias publik project ini: **`cms_ops`** — dipakai untuk judul admin
+> (`DJANGO_SITE_TITLE`) dan komunikasi. Identifier internal **tidak berubah**:
+> repo `ops_views`, package `config`, database `ops_views`
+> (lihat [ADR-014](docs/DECISIONS.md#adr-014--alias-publik-cms_ops-identifier-internal-tidak-berubah)).
 
 Django 6.1 operations panel with a [Unfold](https://unfoldadmin.com/) admin, split
 settings per environment, and a **modular-per-feature** layout designed so any
@@ -237,7 +242,8 @@ make db-status                     # kalau mati: docker start postgres
 # 5. Database + akun admin
 #    Role & database `ops_views` dibuat sekali per mesin - lihat bagian Database
 make migrate
-make superuser                     # diminta EMAIL, bukan username
+make seed                          # akun admin dari DJANGO_SEED_ADMIN_* di .env
+#    atau: make superuser          # interaktif, diminta EMAIL (bukan username)
 
 # 6. Jalankan
 make run                           # atau: make run PORT=8100
@@ -253,9 +259,17 @@ di `.env` — sisanya sama.
 
 | URL | Isi |
 |---|---|
+| http://127.0.0.1:8000/ | Landing page (publik, tanpa login) |
 | http://127.0.0.1:8000/admin/ | Admin panel (Unfold) |
 | http://127.0.0.1:8000/health/live/ | Liveness probe |
 | http://127.0.0.1:8000/health/ready/ | Readiness probe (cek koneksi DB) |
+
+Landing page dan admin memakai bahasa visual yang sama. Tampilan admin
+di-override lewat `UNFOLD["STYLES"]` yang menunjuk ke
+`apps/common/static/common/admin.css` — hook resmi Unfold, jadi upgrade paket
+tidak menabraknya. Berkas itu dimuat **sebelum** `styles.css` milik Unfold,
+sehingga aturannya diberi awalan `body`/`html.dark` supaya menang lewat
+spesifisitas, bukan `!important`.
 
 Perintah harian (`make help` untuk daftar lengkap):
 
@@ -263,6 +277,7 @@ Perintah harian (`make help` untuk daftar lengkap):
 make db-status / db-logs   # container PostgreSQL bersama
 make migrations            # setelah ubah model
 make migrate
+make seed                  # akun admin pertama (idempotent)
 make test                  # test suite
 make dbshell               # psql ke database aktif
 make verify                # GATE: check + migrasi + test + audit keamanan
@@ -285,6 +300,9 @@ asli di server). **Tidak ada satu pun secret di dalam kode.**
 | `DJANGO_DEBUG` | `False` di base, `True` di local | Wajib `False` di production |
 | `DJANGO_ALLOWED_HOSTS` | — wajib di production | Dipisah koma |
 | `DJANGO_ADMIN_URL` | `admin/` | Ubah di production untuk mengurangi bot login |
+| `DJANGO_SITE_TITLE` | `CMS Ops` | Judul admin (tab browser & header sidebar) — alias publik `cms_ops` |
+| `DJANGO_SEED_ADMIN_EMAIL` | kosong | Email admin pertama untuk `make seed` |
+| `DJANGO_SEED_ADMIN_PASSWORD` | kosong | Password admin pertama — **ganti di luar lokal** |
 | `DJANGO_CSRF_TRUSTED_ORIGINS` | kosong | Wajib diisi kalau pakai HTTPS + domain |
 | `DATABASE_URL` | — **wajib** | Harus `postgres://...`. Engine lain ditolak |
 | `DATABASE_CONN_MAX_AGE` | `60` (local) / `600` (prod) | Connection pooling |
@@ -295,6 +313,54 @@ asli di server). **Tidak ada satu pun secret di dalam kode.**
 | `DJANGO_TIME_ZONE` | `Asia/Jakarta` | |
 | `DJANGO_LOG_LEVEL` | `INFO` | |
 | `DJANGO_ADMINS` | kosong | `Nama:email@domain` — penerima laporan error 500 |
+
+### Akun admin pertama (seeder)
+
+`make seed` (= `manage.py seed_admin`) membuat satu akun superuser dari
+`.env`, supaya setup di mesin baru tidak perlu prompt interaktif:
+
+```bash
+make seed
+# admin: admin@ops.local dibuat
+```
+
+Nilai default untuk development sudah terisi di `.env.example`:
+
+| | |
+|---|---|
+| Email | `admin@ops.local` |
+| Password | `OpsViews!Dev2026` |
+
+> **Kredensial ini bukan rahasia.** Nilainya ada di `.env.example` yang
+> ter-commit, jadi siapa pun yang bisa membaca repo tahu isinya. Aman untuk
+> mesin lokal, **tidak pernah** untuk host yang bisa dijangkau orang lain.
+
+Sifat perintahnya:
+
+- **Idempotent** — kalau email itu sudah ada, perintah melewatinya dan tidak
+  menyentuh password maupun profil akun yang sudah dipakai. Boleh dijalankan
+  berulang seperti `sync_features`.
+- **Lewat service** (R5) — memakai `services.register_user`, jadi validator
+  password tetap jalan dan event `accounts.user_registered` tetap terbit.
+  Password lemah ditolak di sini, bukan diam-diam diterima.
+- **Fail-closed** — kalau `DJANGO_SEED_ADMIN_*` kosong, perintah berhenti
+  dengan pesan jelas, bukan membuat akun asal-asalan.
+- **Menolak jalan saat `DEBUG=False`** kecuali diberi `--force`. Ini yang
+  mencegah `.env.example` disalin apa adanya ke server lalu ikut menanam
+  kredensial yang diketahui publik.
+
+Di server, jangan pakai seeder — pakai `make superuser`:
+
+```bash
+make superuser        # interaktif; password tidak pernah singgah di file .env
+```
+
+Kalau memang harus non-interaktif di server (mis. provisioning otomatis), isi
+`DJANGO_SEED_ADMIN_*` dengan nilai yang di-generate, jalankan
+`manage.py seed_admin --force`, lalu **hapus kedua baris itu dari environment**
+begitu akun terbentuk.
+
+---
 
 **Sifat fail-closed**: `production.py` tidak menyediakan default untuk
 `DJANGO_SECRET_KEY` maupun `DJANGO_ALLOWED_HOSTS`, dan `base.py` tidak
@@ -741,6 +807,10 @@ sudo chown ops:ops /srv/ops_views/.env
 sudo chmod 600 /srv/ops_views/.env    # hanya ops yang bisa baca
 ```
 
+`DJANGO_SEED_ADMIN_*` sengaja **tidak** ada di sini: akun admin server dibuat
+interaktif di langkah berikutnya, supaya passwordnya tidak pernah tersimpan di
+file. `seed_admin` juga menolak jalan saat `DEBUG=False` tanpa `--force`.
+
 ### 6. Migrasi + static + verifikasi
 
 ```bash
@@ -748,7 +818,7 @@ cd /srv/ops_views
 sudo -u ops env/bin/python manage.py check --deploy --fail-level WARNING
 sudo -u ops env/bin/python manage.py migrate
 sudo -u ops env/bin/python manage.py collectstatic --noinput
-sudo -u ops env/bin/python manage.py createsuperuser
+sudo -u ops env/bin/python manage.py createsuperuser   # bukan seed_admin
 ```
 
 `check --deploy` harus lolos **tanpa satu pun warning** sebelum lanjut.
@@ -935,6 +1005,7 @@ Yang **sudah** dikonfigurasi di repo ini:
 - [x] Panjang password minimum 12 karakter (default Django 8)
 - [x] URL admin bisa dipindah lewat `DJANGO_ADMIN_URL`
 - [x] Hanya superuser yang bisa memberi hak staff/superuser/permission
+- [x] Seeder admin menolak jalan saat `DEBUG=False` tanpa `--force`
 - [x] Batas upload 5 MB (`DATA_UPLOAD_MAX_MEMORY_SIZE`)
 - [x] Static file production pakai `ManifestStaticFilesStorage` (hashed)
 - [x] `manage.py check --deploy --fail-level WARNING` lolos bersih
@@ -945,6 +1016,8 @@ Yang **sudah** dikonfigurasi di repo ini:
 
 Yang harus **kamu** lakukan di server:
 
+- [ ] Buat akun admin lewat `make superuser`, **bukan** `make seed` — kredensial
+      di `.env.example` diketahui publik lewat repo
 - [ ] `chmod 600 .env`, dimiliki user aplikasi
 - [ ] `SECRET_KEY` unik per environment — jangan pakai ulang dari dev
 - [ ] PostgreSQL hanya listen di `127.0.0.1` (atau private network + `sslmode=require`)

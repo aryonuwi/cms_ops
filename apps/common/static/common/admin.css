@@ -1,0 +1,154 @@
+/* Tema admin agar senada dengan landing page (apps/common/static/common/home.css).
+ *
+ * Dipasang lewat UNFOLD["STYLES"] - hook resmi Unfold, bukan menimpa template,
+ * supaya upgrade paket tidak menabrak perubahan ini.
+ *
+ * Catatan spesifisitas: Unfold memuat styles.css SESUDAH file ini (lihat
+ * unfold/layouts/skeleton.html), jadi selector di sini sengaja diberi awalan
+ * `body`/`html.dark` supaya menang lewat spesifisitas, bukan `!important`.
+ */
+
+:root {
+  --fx-sky: #38bdf8;
+  --fx-violet: #a855f7;
+  --fx-gold: #fbbf24;
+  --fx-line: rgba(125, 211, 252, .28);
+  --fx-glass: rgba(255, 255, 255, .78);
+  --fx-shadow: 0 30px 70px -36px rgba(2, 32, 71, .4);
+}
+
+html.dark {
+  --fx-glass: rgba(16, 28, 47, .72);
+  --fx-shadow: 0 30px 80px -34px rgba(1, 8, 20, .95);
+}
+
+/* ---------- aurora ambien ---------------------------------------------------
+ * Blob yang sama seperti di landing, jauh lebih redup: ini ruang kerja, bukan
+ * etalase - latar tidak boleh bersaing dengan tabel dan formulir. */
+
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  border-radius: 50%;
+  filter: blur(110px);
+  pointer-events: none;
+  z-index: 0;
+}
+body::before {
+  width: 42vw; height: 42vw; top: -16vw; right: -10vw; opacity: .13;
+  background: radial-gradient(circle, var(--fx-sky), transparent 68%);
+}
+body::after {
+  width: 34vw; height: 34vw; bottom: -14vw; left: -8vw; opacity: .1;
+  background: radial-gradient(circle, var(--fx-violet), transparent 70%);
+}
+html.dark body::before { opacity: .2; }
+html.dark body::after { opacity: .16; }
+
+/* Login adalah halaman etalase, bukan ruang kerja - auranya boleh sepenuh
+   landing page. */
+body.login::before { opacity: .3; }
+body.login::after { opacity: .24; }
+html.dark body.login::before { opacity: .42; }
+html.dark body.login::after { opacity: .3; }
+
+/* ---------- permukaan primary jadi gradasi ----------------------------------
+ * Satu aturan ini menyeragamkan lencana sidebar, tombol utama dan tombol
+ * simpan dengan tombol di landing. */
+
+body .bg-primary-600 {
+  background-image: linear-gradient(135deg, var(--fx-sky), var(--fx-violet));
+  border-color: transparent;
+}
+body a.bg-primary-600:hover,
+body button.bg-primary-600:hover,
+body input.bg-primary-600:hover {
+  filter: brightness(1.06);
+}
+
+/* ---------- halaman login --------------------------------------------------- */
+
+body.login { background: #eef2f9; }
+html.dark body.login { background: #05080f; }
+
+body.login #page { background: transparent; }
+html.dark body.login #page { background: transparent; }
+
+/* Kartu kaca yang membungkus judul + formulir. */
+body.login .w-full.sm\:w-96 {
+  position: relative;
+  z-index: 1;
+  padding: 2rem 1.75rem;
+  border-radius: 18px;
+  border: 1px solid var(--fx-line);
+  background: var(--fx-glass);
+  backdrop-filter: blur(14px);
+  box-shadow: var(--fx-shadow);
+  animation: fxRise .8s cubic-bezier(.22, .85, .28, 1) backwards;
+}
+@keyframes fxRise { from { opacity: 0; transform: translateY(18px); filter: blur(6px); } }
+
+/* Nama produk diberi gradasi, seperti judul di landing. */
+body.login h1 span:last-child {
+  background-image: linear-gradient(100deg, var(--fx-sky) 0%, var(--fx-violet) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+body.login #login-form .submit-row {
+  background-image: linear-gradient(115deg, var(--fx-sky), var(--fx-violet), var(--fx-sky));
+  background-size: 220% 100%;
+  border-color: transparent;
+  color: #05131f;
+  font-weight: 650;
+  box-shadow: 0 14px 32px -16px var(--fx-violet);
+  transition: background-position .5s ease, transform .2s ease, box-shadow .2s ease;
+}
+body.login #login-form .submit-row:hover {
+  background-position: 100% 50%;
+  transform: translateY(-2px);
+  box-shadow: 0 20px 40px -16px var(--fx-violet);
+}
+
+body.login input[type="text"]:focus,
+body.login input[type="email"]:focus,
+body.login input[type="password"]:focus {
+  border-color: var(--fx-sky);
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, .18);
+}
+
+/* ---------- kerangka admin -------------------------------------------------- */
+
+/* Konten harus berada di atas aurora. */
+body > #container,
+body > .flex,
+body #page,
+body #main {
+  position: relative;
+  z-index: 1;
+}
+
+/* Kartu daftar aplikasi meminjam perlakuan panel di landing: garis tipis
+   bernada primary, bukan kotak polos. */
+body .module > div.rounded-default {
+  border: 1px solid var(--fx-line);
+}
+
+/* Sidebar dipisahkan garis bernada sama, bukan abu-abu netral. */
+body:not(.login) #nav-sidebar,
+body:not(.login) aside {
+  border-right-color: var(--fx-line);
+}
+
+/* Garis atas beraksen, gema dari garis di footer landing. */
+body:not(.login) #header,
+body:not(.login) header {
+  border-bottom: 1px solid var(--fx-line);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body.login .w-full.sm\:w-96 { animation: none; }
+  body.login #login-form .submit-row { transition: none; }
+}

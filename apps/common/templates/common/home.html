@@ -1,0 +1,199 @@
+{% load i18n static %}<!doctype html>
+<html lang="{{ LANGUAGE_CODE|default:'en' }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>{{ site_title }} — {% translate "Gift, voucher and hamper operations" %}</title>
+<meta name="description" content="{% translate 'ERP for gift, voucher and hamper operations — catalog, redemption, merchants and fulfillment in one panel.' %}">
+<link rel="stylesheet" href="{% static 'common/home.css' %}">
+</head>
+<body>
+<a class="skip" href="#main">{% translate "Skip to content" %}</a>
+<div class="aura" aria-hidden="true"><i></i><i></i><i></i></div>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="{% url 'common:home' %}">
+      <span class="brand__mark" aria-hidden="true">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="9" width="18" height="12" rx="2"/><path d="M3 13h18M12 9v12"/><path d="M12 9S9.5 4.6 7.4 5.2C5.9 5.6 5.7 8 7.6 8.7c1.5.5 4.4.3 4.4.3zM12 9s2.5-4.4 4.6-3.8c1.5.4 1.7 2.8-.2 3.5-1.5.5-4.4.3-4.4.3z"/></svg>
+      </span>
+      <span>
+        <span class="brand__name">{{ site_title }}</span>
+        <span class="brand__tag">{% translate "Gift & voucher operations" %}</span>
+      </span>
+    </a>
+    <nav>
+      <a class="btn btn--primary" href="{% url 'admin:index' %}">
+        {% translate "Open console" %}
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
+      </a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <div class="hero">
+    <div class="wrap">
+      <div class="hero__copy">
+        <span class="eyebrow reveal" style="--i:0"><span class="dot"></span>{% translate "One panel, every gift" %}</span>
+        <h1 class="reveal" style="--i:1">{% translate "Run gifting like" %} <span class="grad">{% translate "an operation, not a spreadsheet" %}</span></h1>
+        <p class="lede reveal" style="--i:2">{% blocktranslate trimmed %}
+          Catalog, vouchers, merchants and fulfillment in one place — every
+          issue, redemption and shipment recorded as it happens, so the numbers
+          you report are the numbers that occurred.
+        {% endblocktranslate %}</p>
+        <div class="hero__cta reveal" style="--i:3">
+          <a class="btn btn--primary btn--lg" href="{% url 'admin:index' %}">{% translate "Open console" %}</a>
+          <a class="btn btn--ghost btn--lg" href="{% url 'common:readiness' %}">{% translate "System status" %}</a>
+        </div>
+        <p class="hero__note reveal" style="--i:4">{% translate "Internal system — sign-in required for every panel." %}</p>
+      </div>
+
+      <div class="stage" aria-hidden="true">
+        <div class="iso" data-parallax>
+          <div class="iso__grid"></div>
+
+          <div class="panel panel--main" style="--i:2">
+            <div class="bar-head"><i></i><i></i><i></i><span>REDEMPTION · 7D</span></div>
+            <div class="tiles">
+              <div class="tile tile--sky"><b data-count-to="1284">0</b><span>VOUCHER AKTIF</span></div>
+              <div class="tile tile--violet"><b data-count-to="317">0</b><span>REDEEM HARI INI</span></div>
+              <div class="tile tile--gold"><b data-count-to="96">0</b><span>HAMPER KIRIM</span></div>
+            </div>
+            <div class="chart">
+              <b style="--h:42%; --d:.55s"></b><b style="--h:64%; --d:.62s"></b>
+              <b style="--h:38%; --d:.69s"></b><b style="--h:81%; --d:.76s"></b>
+              <b style="--h:57%; --d:.83s"></b><b style="--h:93%; --d:.9s"></b>
+              <b style="--h:70%; --d:.97s"></b>
+            </div>
+          </div>
+
+          <div class="panel panel--list" style="--i:3">
+            <div class="bar-head"><i></i><i></i><i></i><span>FULFILLMENT</span></div>
+            <div class="rows">
+              <div class="row"><i class="ok"></i>Hamper Lebaran A<b>DIKIRIM</b></div>
+              <div class="row"><i class="go"></i>Voucher e-Gift 250k<b>AKTIF</b></div>
+              <div class="row"><i class="wait"></i>Parcel Korporat<b>PACKING</b></div>
+              <div class="row"><i class="ok"></i>Gift Card Merchant<b>SELESAI</b></div>
+            </div>
+          </div>
+
+          <div class="panel panel--voucher" style="--i:4">
+            <div class="gift">
+              <div class="gift__label">e-Gift Voucher</div>
+              <div class="gift__value">Rp 500.000</div>
+              <div class="gift__code">FLX-8H2K-90QD</div>
+            </div>
+          </div>
+
+          <div class="panel panel--kpi" style="--i:5">
+            <div class="kpi-big">
+              <b data-count-to="98.4" data-count-decimals="1" data-count-suffix="%">0</b>
+              <span>REDEEM TERVERIFIKASI</span>
+            </div>
+            <div class="spark">
+              <b style="--h:40%; --d:0s"></b><b style="--h:62%; --d:.12s"></b>
+              <b style="--h:52%; --d:.24s"></b><b style="--h:78%; --d:.36s"></b>
+              <b style="--h:66%; --d:.48s"></b><b style="--h:88%; --d:.6s"></b>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="strip" data-observe>
+    <div class="wrap">
+      <div class="stat" style="--i:0"><b>{% translate "Multi-merchant" %}</b><span>{% translate "one catalog, many partners" %}</span></div>
+      <div class="stat" style="--i:1"><b>{% translate "Voucher & hamper" %}</b><span>{% translate "digital and physical in one flow" %}</span></div>
+      <div class="stat" style="--i:2"><b>{% translate "Traceable" %}</b><span>{% translate "every issue and redemption recorded" %}</span></div>
+      <div class="stat" style="--i:3"><b>{% translate "Default deny" %}</b><span>{% translate "access granted, never assumed" %}</span></div>
+    </div>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <small>{{ site_title }} — {% translate "internal operations system" %}</small>
+    <span>
+      <a href="{% url 'common:liveness' %}">{% translate "Liveness" %}</a> ·
+      <a href="{% url 'common:readiness' %}">{% translate "Readiness" %}</a> ·
+      <a href="{% url 'admin:index' %}">{% translate "Console" %}</a>
+    </span>
+  </div>
+</footer>
+
+<script>
+(function () {
+  var still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // --- angka menghitung naik -----------------------------------------------
+  function count(el) {
+    var to = parseFloat(el.dataset.countTo);
+    var dec = parseInt(el.dataset.countDecimals || "0", 10);
+    var suffix = el.dataset.countSuffix || "";
+    var fmt = function (v) {
+      return v.toLocaleString("id-ID", {
+        minimumFractionDigits: dec, maximumFractionDigits: dec
+      }) + suffix;
+    };
+    if (still) { el.textContent = fmt(to); return; }
+
+    var dur = 1500, t0 = null, frames = 0;
+    requestAnimationFrame(function step(now) {
+      if (t0 === null) t0 = now;
+      frames++;
+      // Sebagian lingkungan (headless, tab yang di-throttle) memberi timestamp
+      // yang tidak maju. Hitungan frame jadi cadangannya supaya animasi tetap
+      // selesai, bukan macet di angka nol.
+      var elapsed = Math.max(now - t0, frames * 16.7);
+      var p = Math.min(elapsed / dur, 1);
+      el.textContent = fmt(to * (1 - Math.pow(1 - p, 3)));
+      if (p < 1) requestAnimationFrame(step);
+    });
+  }
+
+  // Angka-angka ini selalu berada di hero (di atas lipatan), jadi tidak perlu
+  // menunggu observer atau timer - keduanya hanya menambah cara untuk gagal.
+  document.querySelectorAll("[data-count-to]").forEach(count);
+
+  // --- strip muncul saat terlihat ------------------------------------------
+  var strip = document.querySelector("[data-observe]");
+  if (strip) {
+    if (still || !("IntersectionObserver" in window)) {
+      strip.classList.add("is-in");
+    } else {
+      new IntersectionObserver(function (entries, obs) {
+        entries.forEach(function (e) {
+          if (e.isIntersecting) { e.target.classList.add("is-in"); obs.unobserve(e.target); }
+        });
+      }, { threshold: .3 }).observe(strip);
+    }
+  }
+
+  // --- parallax panggung mengikuti kursor -----------------------------------
+  if (still || !window.matchMedia("(pointer: fine)").matches) return;
+
+  var iso = document.querySelector("[data-parallax]");
+  if (!iso) return;
+  var rx = 15, ry = -23, tx = 15, ty = -23, raf = null;
+
+  window.addEventListener("pointermove", function (e) {
+    tx = 15 - (e.clientY / window.innerHeight - 0.5) * 9;
+    ty = -23 + (e.clientX / window.innerWidth - 0.5) * 13;
+    if (!raf) raf = requestAnimationFrame(tick);
+  }, { passive: true });
+
+  // Diperhalus (lerp) supaya gerakannya mengikuti, bukan menyentak.
+  function tick() {
+    rx += (tx - rx) * 0.08;
+    ry += (ty - ry) * 0.08;
+    iso.style.animation = "none";
+    iso.style.transform = "rotateX(" + rx.toFixed(2) + "deg) rotateY(" + ry.toFixed(2) + "deg)";
+    raf = (Math.abs(tx - rx) > 0.05 || Math.abs(ty - ry) > 0.05) ? requestAnimationFrame(tick) : null;
+  }
+})();
+</script>
+</body>
+</html>

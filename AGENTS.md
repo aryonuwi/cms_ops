@@ -35,6 +35,7 @@ Sebelum melapor selesai, jalankan **gate** di [§7](#7-definition-of-done).
 | | |
 |---|---|
 | Nama | ops_views |
+| Alias publik | `cms_ops` — tampilan admin & komunikasi (`DJANGO_SITE_TITLE`, default "CMS Ops"). Identifier internal TIDAK ikut berubah, lihat ADR-014 |
 | Framework | Django 6.1, Python 3.14 |
 | Admin UI | django-unfold 0.104.1 |
 | Database | **PostgreSQL 17 — satu-satunya engine yang didukung** |

@@ -12,8 +12,8 @@ from django.urls import include, path
 
 urlpatterns = [
     path(settings.ADMIN_URL, admin.site.urls),
-    # Operational probes - no feature module owns these.
-    path("health/", include("apps.common.urls")),
+    # Landing page + operational probes - no feature module owns these.
+    path("", include("apps.common.urls")),
     # Feature modules
     # path("api/accounts/", include("apps.accounts.urls")),
 ]

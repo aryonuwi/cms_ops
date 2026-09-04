@@ -43,8 +43,11 @@ migrations: guard  ## Buat migrasi baru
 migrate: guard  ## Terapkan migrasi
 	$(PY) manage.py migrate
 
-superuser: guard  ## Buat akun admin (diminta email)
+superuser: guard  ## Buat akun admin (interaktif, diminta email)
 	$(PY) manage.py createsuperuser
+
+seed: guard  ## Buat akun admin pertama dari DJANGO_SEED_ADMIN_* di .env
+	$(PY) manage.py seed_admin
 
 # Mesin ini menjalankan beberapa app; 8000 sering sudah dipakai.
 #   make run PORT=8100

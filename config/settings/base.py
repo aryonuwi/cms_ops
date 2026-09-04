@@ -9,6 +9,7 @@ from pathlib import Path
 
 import environ
 from django.core.exceptions import ImproperlyConfigured
+from django.templatetags.static import static
 
 # ops_views/config/settings/base.py -> ops_views/
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -163,6 +164,12 @@ AUTH_PASSWORD_VALIDATORS = [
 LOGIN_URL = "admin:login"
 LOGIN_REDIRECT_URL = "admin:index"
 
+# Akun admin pertama, dipakai `manage.py seed_admin` saat setup awal. Sengaja
+# tanpa default: kredensial tidak pernah tinggal di dalam kode (R2), dan
+# perintahnya berhenti dengan pesan jelas kalau keduanya kosong.
+SEED_ADMIN_EMAIL = env("DJANGO_SEED_ADMIN_EMAIL", default="")
+SEED_ADMIN_PASSWORD = env("DJANGO_SEED_ADMIN_PASSWORD", default="")
+
 
 # ---------------------------------------------------------------------------
 # Internationalization
@@ -252,16 +259,24 @@ LOGGING = {
 # Navigation is assembled from each feature module's own contribution, so
 # adding a module does not mean editing a central list.
 
+# Public name of the panel. The project is aliased as `cms_ops` (ADR-014);
+# the human-readable form is configurable per environment without a code change.
+SITE_TITLE = env("DJANGO_SITE_TITLE", default="CMS Ops")
+
 UNFOLD = {
-    "SITE_TITLE": "Ops Views",
-    "SITE_HEADER": "Ops Views",
+    # Menyelaraskan admin dengan landing page. STYLES adalah hook resmi Unfold;
+    # file-nya dimuat sebelum styles.css milik Unfold, jadi aturannya menang
+    # lewat spesifisitas - lihat catatan di admin.css.
+    "STYLES": [lambda request: static("common/admin.css")],
+    "SITE_TITLE": SITE_TITLE,
+    "SITE_HEADER": SITE_TITLE,
     "SITE_SUBHEADER": "Operations control panel",
     "SITE_SYMBOL": "monitoring",
     "SHOW_HISTORY": True,
     "SHOW_VIEW_ON_SITE": False,
     "SHOW_BACK_BUTTON": True,
     "THEME": None,  # let the operator toggle light/dark
-    "BORDER_RADIUS": "6px",
+    "BORDER_RADIUS": "10px",  # sejalan dengan kartu di landing page
     "COLORS": {
         "primary": {
             "50": "240 249 255",
