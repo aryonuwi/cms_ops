@@ -67,6 +67,25 @@ class UserAdmin(BaseUserAdmin, BaseModelAdmin):
             readonly += ["is_staff", "is_superuser", "user_permissions", "groups", "status"]
         return readonly
 
+    # Enforcement (ADR-016): a grant must actually block the URL, not just hide
+    # the menu. Each admin operation maps to a catalog action, so ``user_can``
+    # is the single gate combining grants, org units and Django permissions.
+    # Superusers bypass inside ``user_can``.
+    def has_module_permission(self, request):
+        return access_selectors.user_can(request.user, "accounts.users.view")
+
+    def has_view_permission(self, request, obj=None):
+        return access_selectors.user_can(request.user, "accounts.users.view")
+
+    def has_add_permission(self, request):
+        return access_selectors.user_can(request.user, "accounts.users.create")
+
+    def has_change_permission(self, request, obj=None):
+        return access_selectors.user_can(request.user, "accounts.users.edit")
+
+    def has_delete_permission(self, request, obj=None):
+        return access_selectors.user_can(request.user, "accounts.users.delete")
+
     @admin.display(description=_("Effective access"))
     def effective_access_summary(self, obj):
         if obj is None:

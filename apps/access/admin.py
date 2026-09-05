@@ -19,27 +19,50 @@ from .models import Action, Feature, FeatureGrant, Module, OrgUnit, OrgUnitMembe
 admin.site.unregister(Group)
 
 
+class SuperuserOnlyAdmin:
+    """Handing out access is as sensitive as handing out staff rights.
+
+    Only superusers may open these admins - enforced at the URL level, not just
+    the sidebar, so a stray model permission cannot be turned into self-grant.
+    """
+
+    def has_module_permission(self, request):
+        return request.user.is_superuser
+
+    def has_view_permission(self, request, obj=None):
+        return request.user.is_superuser
+
+    def has_add_permission(self, request):
+        return request.user.is_superuser
+
+    def has_change_permission(self, request, obj=None):
+        return request.user.is_superuser
+
+    def has_delete_permission(self, request, obj=None):
+        return request.user.is_superuser
+
+
 @admin.register(Group)
-class GroupAdmin(BaseGroupAdmin, BaseModelAdmin):
+class GroupAdmin(SuperuserOnlyAdmin, BaseGroupAdmin, BaseModelAdmin):
     pass
 
 
 @admin.register(Feature)
-class FeatureAdmin(BaseModelAdmin):
+class FeatureAdmin(SuperuserOnlyAdmin, BaseModelAdmin):
     list_display = ("slug", "label", "module", "required_permission", "is_active")
     list_filter = ("module", "is_active")
     search_fields = ("slug", "label", "description")
 
 
 @admin.register(Module)
-class ModuleAdmin(BaseModelAdmin):
+class ModuleAdmin(SuperuserOnlyAdmin, BaseModelAdmin):
     list_display = ("slug", "label", "package", "is_active", "order")
     list_filter = ("is_active",)
     search_fields = ("slug", "label", "package")
 
 
 @admin.register(Action)
-class ActionAdmin(BaseModelAdmin):
+class ActionAdmin(SuperuserOnlyAdmin, BaseModelAdmin):
     list_display = ("slug", "code", "feature", "category", "required_permission", "is_active")
     list_filter = ("category", "is_active", "feature__module")
     list_select_related = ("feature",)
@@ -112,7 +135,7 @@ class FeatureGrantForm(forms.ModelForm):
 
 
 @admin.register(FeatureGrant)
-class FeatureGrantAdmin(BaseModelAdmin):
+class FeatureGrantAdmin(SuperuserOnlyAdmin, BaseModelAdmin):
     form = FeatureGrantForm
     list_display = ("feature", "action", "grantee", "effect")
     list_filter = ("effect", "grantee_type", "feature")
@@ -150,7 +173,7 @@ class FeatureGrantAdmin(BaseModelAdmin):
 
 
 @admin.register(OrgUnit)
-class OrgUnitAdmin(BaseModelAdmin):
+class OrgUnitAdmin(SuperuserOnlyAdmin, BaseModelAdmin):
     list_display = ("name", "slug", "parent", "is_active", "order")
     list_filter = ("is_active",)
     search_fields = ("name", "slug")
@@ -196,7 +219,7 @@ class OrgUnitMembershipForm(forms.ModelForm):
 
 
 @admin.register(OrgUnitMembership)
-class OrgUnitMembershipAdmin(BaseModelAdmin):
+class OrgUnitMembershipAdmin(SuperuserOnlyAdmin, BaseModelAdmin):
     form = OrgUnitMembershipForm
     list_display = ("org_unit", "member")
     list_filter = ("org_unit",)
