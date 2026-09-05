@@ -4,6 +4,8 @@ from apps.common.events import DomainEvent
 
 FEATURE_GRANTED = "access.feature_granted"
 FEATURE_REVOKED = "access.feature_revoked"
+ACTION_GRANTED = "access.action_granted"
+ACTION_REVOKED = "access.action_revoked"
 CATALOG_SYNCED = "access.catalog_synced"
 
 
@@ -28,6 +30,46 @@ def feature_revoked(
         name=FEATURE_REVOKED,
         payload={
             "feature_slug": feature_slug,
+            "grantee_type": grantee_type,
+            "grantee_id": grantee_id,
+            "effect": effect,
+        },
+    )
+
+
+def action_granted(
+    *,
+    feature_slug: str,
+    action_slug: str,
+    grantee_type: str,
+    grantee_id: str,
+    effect: str,
+) -> DomainEvent:
+    return DomainEvent(
+        name=ACTION_GRANTED,
+        payload={
+            "feature_slug": feature_slug,
+            "action_slug": action_slug,
+            "grantee_type": grantee_type,
+            "grantee_id": grantee_id,
+            "effect": effect,
+        },
+    )
+
+
+def action_revoked(
+    *,
+    feature_slug: str,
+    action_slug: str,
+    grantee_type: str,
+    grantee_id: str,
+    effect: str,
+) -> DomainEvent:
+    return DomainEvent(
+        name=ACTION_REVOKED,
+        payload={
+            "feature_slug": feature_slug,
+            "action_slug": action_slug,
             "grantee_type": grantee_type,
             "grantee_id": grantee_id,
             "effect": effect,

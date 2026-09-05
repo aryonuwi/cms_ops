@@ -184,16 +184,18 @@ class OrgUnitMembership(BaseModel):
 
 
 class FeatureGrant(BaseModel):
-    """One access decision: which group or user may (or may not) use a feature.
+    """One access decision: who may (or may not) use a feature or action.
 
-    ``deny`` outranks ``allow`` at the same level and a personal (user) grant
-    outranks group grants - ``selectors.user_can_access`` is the single place
-    that precedence is decided, and it stays fail-closed by default.
+    A grant targets a whole feature, or one action inside it, and a grantee -
+    a group, a user, or an org unit. Precedence is decided in one place:
+    ``selectors.user_can`` for actions and ``selectors.user_can_access`` for
+    menu visibility, both fail-closed by default.
     """
 
     class GranteeType(models.TextChoices):
         GROUP = "group", _("Group")
         USER = "user", _("User")
+        ORG_UNIT = "org_unit", _("Org unit")
 
     class Effect(models.TextChoices):
         ALLOW = "allow", _("Allow")
@@ -204,6 +206,15 @@ class FeatureGrant(BaseModel):
         on_delete=models.CASCADE,
         related_name="grants",
         verbose_name=_("feature"),
+    )
+    # Null means "the whole feature"; set it to narrow the grant to one action.
+    action = models.ForeignKey(
+        Action,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="grants",
+        verbose_name=_("action"),
     )
     grantee_type = models.CharField(
         _("grantee type"), max_length=10, choices=GranteeType.choices
@@ -217,6 +228,16 @@ class FeatureGrant(BaseModel):
         blank=True,
         related_name="feature_grants",
         verbose_name=_("group"),
+    )
+    # OrgUnit lives in this same module, so a real FK is safe (R4 only forbids
+    # cross-module FKs) and keeps referential integrity.
+    org_unit = models.ForeignKey(
+        OrgUnit,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="feature_grants",
+        verbose_name=_("org unit"),
     )
     # accounts.User belongs to another feature module, so R4 applies: store
     # the id, not a ForeignKey, keeping this module liftable off the shared DB.
@@ -238,30 +259,64 @@ class FeatureGrant(BaseModel):
                         grantee_type="group",
                         group__isnull=False,
                         user_id__isnull=True,
+                        org_unit__isnull=True,
                     )
                     | models.Q(
                         grantee_type="user",
                         user_id__isnull=False,
                         group__isnull=True,
+                        org_unit__isnull=True,
+                    )
+                    | models.Q(
+                        grantee_type="org_unit",
+                        org_unit__isnull=False,
+                        group__isnull=True,
+                        user_id__isnull=True,
                     )
                 ),
                 name="access_grant_exactly_one_grantee",
             ),
-            # One decision per feature + grantee: re-granting goes through
-            # services.grant_feature, which upserts instead of duplicating.
+            # One decision per (feature or action) + grantee: re-granting goes
+            # through services.grant_feature, which upserts instead of
+            # duplicating. PostgreSQL treats NULLs as distinct, so the
+            # feature-scoped and action-scoped constraints are split on
+            # action__isnull to keep each one enforceable.
             models.UniqueConstraint(
                 fields=["feature", "group"],
-                condition=models.Q(grantee_type="group"),
-                name="access_grant_unique_per_group",
+                condition=models.Q(grantee_type="group", action__isnull=True),
+                name="access_grant_unique_group_feature",
+            ),
+            models.UniqueConstraint(
+                fields=["feature", "action", "group"],
+                condition=models.Q(grantee_type="group", action__isnull=False),
+                name="access_grant_unique_group_action",
             ),
             models.UniqueConstraint(
                 fields=["feature", "user_id"],
-                condition=models.Q(grantee_type="user"),
-                name="access_grant_unique_per_user",
+                condition=models.Q(grantee_type="user", action__isnull=True),
+                name="access_grant_unique_user_feature",
+            ),
+            models.UniqueConstraint(
+                fields=["feature", "action", "user_id"],
+                condition=models.Q(grantee_type="user", action__isnull=False),
+                name="access_grant_unique_user_action",
+            ),
+            models.UniqueConstraint(
+                fields=["feature", "org_unit"],
+                condition=models.Q(grantee_type="org_unit", action__isnull=True),
+                name="access_grant_unique_orgunit_feature",
+            ),
+            models.UniqueConstraint(
+                fields=["feature", "action", "org_unit"],
+                condition=models.Q(grantee_type="org_unit", action__isnull=False),
+                name="access_grant_unique_orgunit_action",
             ),
         ]
 
     def __str__(self) -> str:
+        scope = self.feature.slug if self.action is None else self.action.slug
         if self.grantee_type == self.GranteeType.GROUP:
-            return f"{self.feature}: {self.group}"
-        return f"{self.feature}: user {self.user_id}"
+            return f"{scope}: {self.group}"
+        if self.grantee_type == self.GranteeType.ORG_UNIT:
+            return f"{scope}: {self.org_unit}"
+        return f"{scope}: user {self.user_id}"

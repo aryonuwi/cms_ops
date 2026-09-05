@@ -49,22 +49,29 @@ def grant_feature(
     grantee_type: str,
     group: Group | None = None,
     user_id: str | None = None,
+    org_unit: OrgUnit | None = None,
+    action: Action | None = None,
     effect: str = FeatureGrant.Effect.ALLOW,
 ) -> FeatureGrant:
-    """Create - or update - the single grant for this feature + grantee.
+    """Create - or update - the single grant for this feature (or action) + grantee.
 
     Re-submitting the same decision must not produce a duplicate row (the
     unique constraints forbid it anyway), so an upsert keeps the admin and
-    future API callers forgiving.
+    future API callers forgiving. ``action=None`` grants the whole feature;
+    setting it narrows the decision to that one action.
     """
+    if action is not None and action.feature_id != feature.pk:
+        raise ValueError("The action must belong to the granted feature.")
+
     if grantee_type == FeatureGrant.GranteeType.GROUP:
         if group is None:
             raise ValueError("A group grant requires a group.")
         grant, _created = FeatureGrant.objects.update_or_create(
             feature=feature,
+            action=action,
             grantee_type=grantee_type,
             group=group,
-            defaults={"effect": effect, "user_id": None},
+            defaults={"effect": effect, "user_id": None, "org_unit": None},
         )
         grantee_id = str(group.pk)
     elif grantee_type == FeatureGrant.GranteeType.USER:
@@ -72,18 +79,31 @@ def grant_feature(
             raise ValueError("A personal grant requires a user_id.")
         grant, _created = FeatureGrant.objects.update_or_create(
             feature=feature,
+            action=action,
             grantee_type=grantee_type,
             user_id=user_id,
-            defaults={"effect": effect, "group": None},
+            defaults={"effect": effect, "group": None, "org_unit": None},
         )
         grantee_id = str(user_id)
+    elif grantee_type == FeatureGrant.GranteeType.ORG_UNIT:
+        if org_unit is None:
+            raise ValueError("An org-unit grant requires an org_unit.")
+        grant, _created = FeatureGrant.objects.update_or_create(
+            feature=feature,
+            action=action,
+            grantee_type=grantee_type,
+            org_unit=org_unit,
+            defaults={"effect": effect, "group": None, "user_id": None},
+        )
+        grantee_id = str(org_unit.pk)
     else:
         raise ValueError(f"Unknown grantee_type: {grantee_type!r}")
 
     transaction.on_commit(
         lambda: publish(
-            events.feature_granted(
-                feature_slug=feature.slug,
+            _granted_event(
+                feature=feature,
+                action=action,
                 grantee_type=grantee_type,
                 grantee_id=grantee_id,
                 effect=effect,
@@ -96,10 +116,15 @@ def grant_feature(
 @transaction.atomic
 def revoke_feature(*, grant: FeatureGrant) -> None:
     """Remove one access decision and announce the previous state."""
-    grantee_id = (
-        str(grant.group.pk) if grant.group is not None else str(grant.user_id)
-    )
+    if grant.grantee_type == FeatureGrant.GranteeType.GROUP:
+        grantee_id = str(grant.group.pk)
+    elif grant.grantee_type == FeatureGrant.GranteeType.ORG_UNIT:
+        grantee_id = str(grant.org_unit.pk)
+    else:
+        grantee_id = str(grant.user_id)
+
     feature_slug = grant.feature.slug
+    action_slug = grant.action.slug if grant.action is not None else None
     grantee_type = grant.grantee_type
     effect = grant.effect
 
@@ -107,13 +132,91 @@ def revoke_feature(*, grant: FeatureGrant) -> None:
 
     transaction.on_commit(
         lambda: publish(
-            events.feature_revoked(
+            _revoked_event(
                 feature_slug=feature_slug,
+                action_slug=action_slug,
                 grantee_type=grantee_type,
                 grantee_id=grantee_id,
                 effect=effect,
             )
         )
+    )
+
+
+@transaction.atomic
+def grant_module(
+    *,
+    module_slug: str,
+    grantee_type: str,
+    group: Group | None = None,
+    user_id: str | None = None,
+    org_unit: OrgUnit | None = None,
+    effect: str = FeatureGrant.Effect.ALLOW,
+) -> int:
+    """Grant a whole module by fanning out to each of its features.
+
+    A module-level decision is a convenience, not a new grant type: it writes
+    one feature-scoped grant per feature under the module, so ``user_can``
+    never has to resolve modules separately.
+    """
+    features = list(Feature.objects.filter(module=module_slug))
+    for feature in features:
+        grant_feature(
+            feature=feature,
+            grantee_type=grantee_type,
+            group=group,
+            user_id=user_id,
+            org_unit=org_unit,
+            effect=effect,
+        )
+    return len(features)
+
+
+def _granted_event(
+    *,
+    feature: Feature,
+    action: Action | None,
+    grantee_type: str,
+    grantee_id: str,
+    effect: str,
+):
+    if action is None:
+        return events.feature_granted(
+            feature_slug=feature.slug,
+            grantee_type=grantee_type,
+            grantee_id=grantee_id,
+            effect=effect,
+        )
+    return events.action_granted(
+        feature_slug=feature.slug,
+        action_slug=action.slug,
+        grantee_type=grantee_type,
+        grantee_id=grantee_id,
+        effect=effect,
+    )
+
+
+def _revoked_event(
+    *,
+    feature_slug: str,
+    action_slug: str | None,
+    grantee_type: str,
+    grantee_id: str,
+    effect: str,
+):
+    if action_slug is None:
+        return events.feature_revoked(
+            feature_slug=feature_slug,
+            grantee_type=grantee_type,
+            grantee_id=grantee_id,
+            effect=effect,
+        )
+    return events.action_revoked(
+        feature_slug=feature_slug,
+        action_slug=action_slug,
+        grantee_type=grantee_type,
+        grantee_id=grantee_id,
+        effect=effect,
     )
 
 

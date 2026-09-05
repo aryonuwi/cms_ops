@@ -156,6 +156,93 @@ def effective_features(user: AbstractBaseUser | AnonymousUser) -> set[str]:
     }
 
 
+def user_can(user: AbstractBaseUser | AnonymousUser, action_slug: str) -> bool:
+    """Decide whether ``user`` may perform the action ``action_slug``.
+
+    Single point of evaluation for action-level access, fail-closed at every
+    step. Precedence:
+
+    * inactive or anonymous user -> ``False``
+    * superuser -> ``True``
+    * unknown, inactive feature or action -> ``False``
+    * ``required_permission`` (action, then feature) not held -> ``False``
+    * action-scoped grant beats feature-scoped grant
+    * within one scope: personal > org unit (incl. ancestors) > group, and
+      deny > allow at the same grantee level
+    * otherwise -> ``False``
+    """
+    if not getattr(user, "is_active", False):
+        return False
+    if user.is_superuser:
+        return True
+
+    action = (
+        Action.objects.select_related("feature")
+        .filter(slug=action_slug, is_active=True, feature__is_active=True)
+        .first()
+    )
+    if action is None:
+        return False
+
+    feature = action.feature
+    if action.required_permission and not user.has_perm(action.required_permission):
+        return False
+    if feature.required_permission and not user.has_perm(feature.required_permission):
+        return False
+
+    group_ids = list(user.groups.values_list("pk", flat=True))
+    org_unit_ids = effective_org_unit_ids(user)
+
+    rows = list(
+        FeatureGrant.objects.filter(feature=feature)
+        .filter(Q(action=action) | Q(action__isnull=True))
+        .filter(
+            Q(grantee_type=FeatureGrant.GranteeType.USER, user_id=user.pk)
+            | Q(grantee_type=FeatureGrant.GranteeType.GROUP, group_id__in=group_ids)
+            | Q(
+                grantee_type=FeatureGrant.GranteeType.ORG_UNIT,
+                org_unit_id__in=org_unit_ids,
+            )
+        )
+        .values_list("action_id", "grantee_type", "effect")
+    )
+
+    action_rows = [row for row in rows if row[0] == action.pk]
+    feature_rows = [row for row in rows if row[0] is None]
+
+    decision = _scope_decision(action_rows)
+    if decision is None:
+        decision = _scope_decision(feature_rows)
+    return bool(decision) if decision is not None else False
+
+
+def _scope_decision(rows) -> bool | None:
+    """Resolve one grant scope to allow / deny / undecided.
+
+    ``rows`` are ``(action_id, grantee_type, effect)`` triples already narrowed
+    to a single scope. Grantee specificity: personal > org unit > group; deny
+    outranks allow within one grantee type.
+    """
+    for grantee_type in (
+        FeatureGrant.GranteeType.USER,
+        FeatureGrant.GranteeType.ORG_UNIT,
+        FeatureGrant.GranteeType.GROUP,
+    ):
+        allow = deny = False
+        for _action_id, row_grantee_type, effect in rows:
+            if row_grantee_type != grantee_type:
+                continue
+            if effect == FeatureGrant.Effect.DENY:
+                deny = True
+            else:
+                allow = True
+        if deny:
+            return False
+        if allow:
+            return True
+    return None
+
+
 def list_org_units(*, include_inactive: bool = False) -> QuerySet[OrgUnit]:
     """The organisation tree's nodes, active ones only unless told otherwise."""
     queryset = OrgUnit.objects.all()

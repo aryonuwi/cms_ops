@@ -62,7 +62,7 @@ class FeatureGrantForm(forms.ModelForm):
 
     class Meta:
         model = FeatureGrant
-        fields = ("feature", "grantee_type", "group", "effect")
+        fields = ("feature", "action", "grantee_type", "group", "org_unit", "effect")
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -76,13 +76,31 @@ class FeatureGrantForm(forms.ModelForm):
         grantee_type = cleaned.get("grantee_type")
         group = cleaned.get("group")
         user = cleaned.get("user")
+        org_unit = cleaned.get("org_unit")
+        feature = cleaned.get("feature")
+        action = cleaned.get("action")
 
-        if grantee_type == FeatureGrant.GranteeType.GROUP and group is None:
-            raise ValidationError(_("A group grant needs a group."))
-        if grantee_type == FeatureGrant.GranteeType.USER and user is None:
-            raise ValidationError(_("A personal grant needs a user."))
-        if group is not None and user is not None:
-            raise ValidationError(_("Pick a group or a user, not both."))
+        if (
+            action is not None
+            and feature is not None
+            and action.feature_id != feature.pk
+        ):
+            raise ValidationError(_("The action must belong to the chosen feature."))
+
+        if grantee_type == FeatureGrant.GranteeType.GROUP:
+            if group is None:
+                raise ValidationError(_("A group grant needs a group."))
+        elif grantee_type == FeatureGrant.GranteeType.USER:
+            if user is None:
+                raise ValidationError(_("A personal grant needs a user."))
+        elif grantee_type == FeatureGrant.GranteeType.ORG_UNIT:
+            if org_unit is None:
+                raise ValidationError(_("An org-unit grant needs an org unit."))
+        else:
+            raise ValidationError(_("Pick a grantee type."))
+
+        if len([g for g in (group, user, org_unit) if g is not None]) > 1:
+            raise ValidationError(_("Pick one grantee, not several."))
         return cleaned
 
     def save(self, commit: bool = True):
@@ -96,10 +114,10 @@ class FeatureGrantForm(forms.ModelForm):
 @admin.register(FeatureGrant)
 class FeatureGrantAdmin(BaseModelAdmin):
     form = FeatureGrantForm
-    list_display = ("feature", "grantee", "effect")
+    list_display = ("feature", "action", "grantee", "effect")
     list_filter = ("effect", "grantee_type", "feature")
-    list_select_related = ("feature", "group")
-    search_fields = ("feature__slug", "group__name")
+    list_select_related = ("feature", "action", "group", "org_unit")
+    search_fields = ("feature__slug", "action__slug", "group__name")
 
     @admin.display(description=_("grantee"))
     def grantee(self, obj: FeatureGrant) -> str:
@@ -117,10 +135,10 @@ class FeatureGrantAdmin(BaseModelAdmin):
             grantee_type=obj.grantee_type,
             group=obj.group,
             user_id=obj.user_id,
+            org_unit=obj.org_unit,
+            action=obj.action,
             effect=obj.effect,
         )
-        # Keep the admin (messages, redirect, log entry) pointing at the row
-        # the service actually persisted.
         obj.pk = grant.pk
 
     def delete_model(self, request, obj):
