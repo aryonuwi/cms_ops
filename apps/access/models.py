@@ -12,6 +12,31 @@ from django.utils.translation import gettext_lazy as _
 from apps.common.models import BaseModel
 
 
+class Module(BaseModel):
+    """An installed feature module (a Django app under ``apps.*``).
+
+    The top level of the access catalog. Seeded by ``services.sync_catalog``
+    from the app registry, so adding a module records it here without editing a
+    central list (ADR-007). Operators may deactivate a module they do not want
+    surfaced; sync never deletes a module that disappeared from code.
+    """
+
+    slug = models.SlugField(_("slug"), max_length=100, unique=True)
+    label = models.CharField(_("label"), max_length=150)
+    package = models.CharField(_("package"), max_length=200, blank=True)
+    description = models.TextField(_("description"), blank=True)
+    is_active = models.BooleanField(_("is active"), default=True)
+    order = models.IntegerField(_("order"), default=0)
+
+    class Meta:
+        verbose_name = _("module")
+        verbose_name_plural = _("modules")
+        ordering = ["order", "slug"]
+
+    def __str__(self) -> str:
+        return self.slug
+
+
 class Feature(BaseModel):
     """A menu or capability another module declares in its ``navigation.py``.
 
@@ -37,6 +62,60 @@ class Feature(BaseModel):
         verbose_name = _("feature")
         verbose_name_plural = _("features")
         ordering = ["module", "label"]
+
+    def __str__(self) -> str:
+        return self.slug
+
+
+class Action(BaseModel):
+    """A single function inside a feature, e.g. ``accounts.users.create``.
+
+    Actions are the level grants point at when staff may only create while a
+    supervisor may also edit. The ``slug`` is globally unique and prefixes the
+    feature slug, so a dotted ``CharField`` is used on purpose - a ``SlugField``
+    would reject the separator.
+    """
+
+    class Category(models.TextChoices):
+        CREATE = "create", _("Create")
+        EDIT = "edit", _("Edit")
+        DELETE = "delete", _("Delete")
+        APPROVE = "approve", _("Approve")
+        CUSTOM = "custom", _("Custom")
+
+    feature = models.ForeignKey(
+        Feature,
+        on_delete=models.CASCADE,
+        related_name="actions",
+        verbose_name=_("feature"),
+    )
+    slug = models.CharField(_("slug"), max_length=250, unique=True)
+    code = models.SlugField(_("code"), max_length=100)
+    label = models.CharField(_("label"), max_length=150)
+    category = models.CharField(
+        _("category"),
+        max_length=20,
+        choices=Category.choices,
+        default=Category.CUSTOM,
+    )
+    # Optional Django permission codename, same role as Feature.required_permission
+    # but at the finer action granularity. sync_catalog never overwrites it.
+    required_permission = models.CharField(
+        _("required permission"), max_length=255, blank=True
+    )
+    is_active = models.BooleanField(_("is active"), default=True)
+    order = models.IntegerField(_("order"), default=0)
+
+    class Meta:
+        verbose_name = _("action")
+        verbose_name_plural = _("actions")
+        ordering = ["feature__slug", "order", "code"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["feature", "code"],
+                name="access_action_unique_per_feature",
+            ),
+        ]
 
     def __str__(self) -> str:
         return self.slug

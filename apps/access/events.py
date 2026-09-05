@@ -4,7 +4,7 @@ from apps.common.events import DomainEvent
 
 FEATURE_GRANTED = "access.feature_granted"
 FEATURE_REVOKED = "access.feature_revoked"
-FEATURES_SYNCED = "access.features_synced"
+CATALOG_SYNCED = "access.catalog_synced"
 
 
 def feature_granted(
@@ -35,8 +35,23 @@ def feature_revoked(
     )
 
 
-def features_synced(*, created: int, updated: int) -> DomainEvent:
+def catalog_synced(
+    *,
+    modules_created: int,
+    modules_updated: int,
+    features_created: int,
+    features_updated: int,
+    actions_created: int,
+    actions_updated: int,
+) -> DomainEvent:
     return DomainEvent(
-        name=FEATURES_SYNCED,
-        payload={"created": created, "updated": updated},
+        name=CATALOG_SYNCED,
+        payload={
+            "modules_created": modules_created,
+            "modules_updated": modules_updated,
+            "features_created": features_created,
+            "features_updated": features_updated,
+            "actions_created": actions_created,
+            "actions_updated": actions_updated,
+        },
     )

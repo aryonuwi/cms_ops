@@ -10,7 +10,7 @@ from __future__ import annotations
 from django.contrib.auth.models import AbstractBaseUser, AnonymousUser
 from django.db.models import Q, QuerySet
 
-from .models import Feature, FeatureGrant
+from .models import Action, Feature, FeatureGrant, Module
 
 
 def get_feature_by_slug(slug: str) -> Feature | None:
@@ -23,6 +23,34 @@ def list_features(*, include_inactive: bool = False) -> QuerySet[Feature]:
     if not include_inactive:
         queryset = queryset.filter(is_active=True)
     return queryset
+
+
+def get_module_by_slug(slug: str) -> Module | None:
+    return Module.objects.filter(slug=slug).first()
+
+
+def list_modules(*, include_inactive: bool = False) -> QuerySet[Module]:
+    """The module catalog, active entries only unless told otherwise."""
+    queryset = Module.objects.all()
+    if not include_inactive:
+        queryset = queryset.filter(is_active=True)
+    return queryset
+
+
+def list_actions(
+    *, feature_slug: str | None = None, include_inactive: bool = False
+) -> QuerySet[Action]:
+    """Actions, optionally narrowed to one feature."""
+    queryset = Action.objects.select_related("feature")
+    if not include_inactive:
+        queryset = queryset.filter(is_active=True, feature__is_active=True)
+    if feature_slug is not None:
+        queryset = queryset.filter(feature__slug=feature_slug)
+    return queryset
+
+
+def get_action_by_slug(slug: str) -> Action | None:
+    return Action.objects.filter(slug=slug).first()
 
 
 def list_grants(

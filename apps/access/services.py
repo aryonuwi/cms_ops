@@ -6,14 +6,16 @@ publication stay in one place - never in a view, admin or another module.
 
 from __future__ import annotations
 
+from dataclasses import asdict, dataclass, replace
+
 from django.contrib.auth.models import Group
 from django.db import transaction
 
 from apps.common.events import publish
-from apps.common.navigation import iter_navigation_groups
+from apps.common.navigation import iter_actions, iter_modules, iter_navigation_groups
 
 from . import events
-from .models import Feature, FeatureGrant
+from .models import Action, Feature, FeatureGrant, Module
 
 
 @transaction.atomic
@@ -115,37 +117,133 @@ def revoke_feature(*, grant: FeatureGrant) -> None:
     )
 
 
-@transaction.atomic
-def sync_features() -> tuple[int, int]:
-    """Refresh the Feature catalog from navigation declarations.
+@dataclass(frozen=True)
+class SyncResult:
+    """What one ``sync_catalog`` run created or updated."""
 
-    Code stays the source of truth for which features exist (ADR-007): this
-    only records what modules declare so grants have stable rows to point at.
-    Operator-managed columns (description, required_permission, is_active)
-    are deliberately left untouched, and features that disappear from code
-    are kept - deactivating them is an operator decision, not a sync side
-    effect, because grants may still reference them.
+    modules_created: int = 0
+    modules_updated: int = 0
+    features_created: int = 0
+    features_updated: int = 0
+    actions_created: int = 0
+    actions_updated: int = 0
+
+
+@transaction.atomic
+def create_module(
+    *,
+    slug: str,
+    label: str,
+    package: str = "",
+    description: str = "",
+    order: int = 0,
+) -> Module:
+    """Register a module that is not (or not yet) installed in the codebase."""
+    return Module.objects.create(
+        slug=slug,
+        label=label,
+        package=package,
+        description=description,
+        order=order,
+    )
+
+
+@transaction.atomic
+def create_action(
+    *,
+    feature: Feature,
+    code: str,
+    label: str,
+    category: str = Action.Category.CUSTOM,
+    required_permission: str = "",
+    order: int = 0,
+) -> Action:
+    """Register an action by hand; declarable actions belong in ``actions.py``."""
+    return Action.objects.create(
+        feature=feature,
+        slug=f"{feature.slug}.{code}",
+        code=code,
+        label=label,
+        category=category,
+        required_permission=required_permission,
+        order=order,
+    )
+
+
+@transaction.atomic
+def sync_catalog() -> SyncResult:
+    """Refresh the Module → Feature → Action catalog from code declarations.
+
+    Code stays the source of truth (ADR-007): modules come from the app
+    registry, features from each module's ``navigation.py`` and actions from
+    each module's ``actions.py``. Every level is an idempotent upsert and
+    nothing is ever deleted - entries that disappear from code are kept,
+    because deactivating them is an operator decision and grants may still
+    reference them. Operator-managed columns (description, required_permission,
+    is_active, order) are deliberately left untouched.
     """
-    created = updated = 0
+    result = SyncResult()
+
+    # Modules first, so Feature.module can point at their slug.
+    for slug, package, label in iter_modules():
+        _module, was_created = Module.objects.update_or_create(
+            slug=slug,
+            defaults={"label": label, "package": package},
+        )
+        if was_created:
+            result = replace(result, modules_created=result.modules_created + 1)
+        else:
+            result = replace(result, modules_updated=result.modules_updated + 1)
 
     for app_name, group in iter_navigation_groups():
         for item in group.get("items", []):
             slug = item.get("feature")
             if not slug:
                 continue
+            # ``app_name`` is the dotted "apps.accounts"; the short label is the
+            # Module slug, which is what Feature.module stores.
+            module_slug = app_name.rsplit(".", 1)[-1]
             _feature, was_created = Feature.objects.update_or_create(
                 slug=slug,
                 defaults={
                     "label": str(item.get("title", slug)),
-                    "module": app_name,
+                    "module": module_slug,
                 },
             )
             if was_created:
-                created += 1
+                result = replace(result, features_created=result.features_created + 1)
             else:
-                updated += 1
+                result = replace(result, features_updated=result.features_updated + 1)
 
-    transaction.on_commit(
-        lambda: publish(events.features_synced(created=created, updated=updated))
-    )
-    return created, updated
+    for app_label, declaration in iter_actions():
+        feature_slug = declaration.get("feature")
+        code = declaration.get("code")
+        if not feature_slug or not code:
+            continue
+        feature = Feature.objects.filter(slug=feature_slug).first()
+        if feature is None:
+            # An action declared for a feature absent from navigation.py: record
+            # the feature too, so the action has a home and grants can point at it.
+            feature = Feature.objects.create(
+                slug=feature_slug,
+                label=str(feature_slug),
+                module=app_label,
+            )
+        action_slug = f"{feature_slug}.{code}"
+        _action, was_created = Action.objects.update_or_create(
+            slug=action_slug,
+            defaults={
+                "feature": feature,
+                "code": code,
+                "label": str(declaration.get("label", code)),
+                "category": declaration.get("category", Action.Category.CUSTOM),
+                "required_permission": declaration.get("required_permission", ""),
+            },
+        )
+        if was_created:
+            result = replace(result, actions_created=result.actions_created + 1)
+        else:
+            result = replace(result, actions_updated=result.actions_updated + 1)
+
+    transaction.on_commit(lambda: publish(events.catalog_synced(**asdict(result))))
+    return result

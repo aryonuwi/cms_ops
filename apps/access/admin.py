@@ -11,7 +11,7 @@ from apps.accounts import selectors as accounts_selectors
 from apps.common.admin import BaseModelAdmin
 
 from . import services
-from .models import Feature, FeatureGrant
+from .models import Action, Feature, FeatureGrant, Module
 
 # django.contrib.auth registers Group with the stock ModelAdmin; re-register it
 # here so grouping lives with the rest of access control and renders
@@ -29,6 +29,21 @@ class FeatureAdmin(BaseModelAdmin):
     list_display = ("slug", "label", "module", "required_permission", "is_active")
     list_filter = ("module", "is_active")
     search_fields = ("slug", "label", "description")
+
+
+@admin.register(Module)
+class ModuleAdmin(BaseModelAdmin):
+    list_display = ("slug", "label", "package", "is_active", "order")
+    list_filter = ("is_active",)
+    search_fields = ("slug", "label", "package")
+
+
+@admin.register(Action)
+class ActionAdmin(BaseModelAdmin):
+    list_display = ("slug", "code", "feature", "category", "required_permission", "is_active")
+    list_filter = ("category", "is_active", "feature__module")
+    list_select_related = ("feature",)
+    search_fields = ("slug", "code", "label", "feature__slug")
 
 
 class FeatureGrantForm(forms.ModelForm):
