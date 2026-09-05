@@ -15,7 +15,7 @@ from apps.common.events import publish
 from apps.common.navigation import iter_actions, iter_modules, iter_navigation_groups
 
 from . import events
-from .models import Action, Feature, FeatureGrant, Module
+from .models import Action, Feature, FeatureGrant, Module, OrgUnit, OrgUnitMembership
 
 
 @transaction.atomic
@@ -247,3 +247,82 @@ def sync_catalog() -> SyncResult:
 
     transaction.on_commit(lambda: publish(events.catalog_synced(**asdict(result))))
     return result
+
+
+def _would_cycle(org_unit: OrgUnit, new_parent: OrgUnit) -> bool:
+    """True if ``new_parent`` is ``org_unit`` or one of its descendants."""
+    node = new_parent
+    while node is not None:
+        if node.pk == org_unit.pk:
+            return True
+        node = node.parent
+    return False
+
+
+@transaction.atomic
+def create_org_unit(
+    *, name: str, slug: str, parent: OrgUnit | None = None, order: int = 0
+) -> OrgUnit:
+    """Create a node in the organisation tree."""
+    org_unit = OrgUnit.objects.create(name=name, slug=slug, parent=parent, order=order)
+    transaction.on_commit(
+        lambda: publish(
+            events.org_unit_created(
+                org_unit_slug=org_unit.slug,
+                parent_slug=org_unit.parent.slug if org_unit.parent is not None else None,
+            )
+        )
+    )
+    return org_unit
+
+
+@transaction.atomic
+def move_org_unit(
+    *, org_unit: OrgUnit, new_parent: OrgUnit | None = None
+) -> OrgUnit:
+    """Re-parent a node, refusing to create a cycle."""
+    if new_parent is not None and _would_cycle(org_unit, new_parent):
+        raise ValueError("Cannot move an org unit under its own descendant.")
+    org_unit.parent = new_parent
+    org_unit.save(update_fields=["parent", "updated_at"])
+    transaction.on_commit(
+        lambda: publish(
+            events.org_unit_moved(
+                org_unit_slug=org_unit.slug,
+                parent_slug=new_parent.slug if new_parent is not None else None,
+            )
+        )
+    )
+    return org_unit
+
+
+@transaction.atomic
+def add_org_member(*, org_unit: OrgUnit, user_id: str) -> OrgUnitMembership:
+    """Add a user to an org unit once, announcing only a real change."""
+    membership, created = OrgUnitMembership.objects.get_or_create(
+        org_unit=org_unit, user_id=user_id
+    )
+    if created:
+        transaction.on_commit(
+            lambda: publish(
+                events.org_unit_member_added(
+                    org_unit_slug=org_unit.slug, user_id=str(user_id)
+                )
+            )
+        )
+    return membership
+
+
+@transaction.atomic
+def remove_org_member(*, membership: OrgUnitMembership) -> None:
+    """Remove one membership and announce the previous state."""
+    org_unit_slug = membership.org_unit.slug
+    user_id = str(membership.user_id)
+    membership.delete()
+    transaction.on_commit(
+        lambda: publish(
+            events.org_unit_member_removed(
+                org_unit_slug=org_unit_slug, user_id=user_id
+            )
+        )
+    )

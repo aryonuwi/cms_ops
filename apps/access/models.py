@@ -121,6 +121,68 @@ class Action(BaseModel):
         return self.slug
 
 
+class OrgUnit(BaseModel):
+    """A node in the organisation tree (company → division → team).
+
+    Models the reporting structure: a supervisor unit owns several staff
+    units, a manager unit owns several supervisor units, and so on. The level
+    a user sits at is its position in this tree, so it stays dynamic and needs
+    no hardcoded role table.
+    """
+
+    name = models.CharField(_("name"), max_length=150)
+    slug = models.SlugField(_("slug"), max_length=150, unique=True)
+    parent = models.ForeignKey(
+        "self",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="children",
+        verbose_name=_("parent"),
+    )
+    is_active = models.BooleanField(_("is active"), default=True)
+    order = models.IntegerField(_("order"), default=0)
+
+    class Meta:
+        verbose_name = _("org unit")
+        verbose_name_plural = _("org units")
+        ordering = ["order", "name"]
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class OrgUnitMembership(BaseModel):
+    """A user's membership in one org unit.
+
+    ``user_id`` stays a plain UUID (R4): ``accounts.User`` lives in another
+    module, so there is no ForeignKey - membership stores the id and callers
+    resolve it through ``accounts.selectors``.
+    """
+
+    org_unit = models.ForeignKey(
+        OrgUnit,
+        on_delete=models.CASCADE,
+        related_name="memberships",
+        verbose_name=_("org unit"),
+    )
+    user_id = models.UUIDField(_("user id"), db_index=True)
+
+    class Meta:
+        verbose_name = _("org unit membership")
+        verbose_name_plural = _("org unit memberships")
+        ordering = ["org_unit__slug"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["org_unit", "user_id"],
+                name="access_membership_unique_per_unit_user",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.org_unit}: {self.user_id}"
+
+
 class FeatureGrant(BaseModel):
     """One access decision: which group or user may (or may not) use a feature.
 

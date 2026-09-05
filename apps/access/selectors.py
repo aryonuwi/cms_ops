@@ -10,7 +10,7 @@ from __future__ import annotations
 from django.contrib.auth.models import AbstractBaseUser, AnonymousUser
 from django.db.models import Q, QuerySet
 
-from .models import Action, Feature, FeatureGrant, Module
+from .models import Action, Feature, FeatureGrant, Module, OrgUnit, OrgUnitMembership
 
 
 def get_feature_by_slug(slug: str) -> Feature | None:
@@ -154,3 +154,51 @@ def effective_features(user: AbstractBaseUser | AnonymousUser) -> set[str]:
         for slug in list_features().values_list("slug", flat=True)
         if user_can_access(user, slug)
     }
+
+
+def list_org_units(*, include_inactive: bool = False) -> QuerySet[OrgUnit]:
+    """The organisation tree's nodes, active ones only unless told otherwise."""
+    queryset = OrgUnit.objects.all()
+    if not include_inactive:
+        queryset = queryset.filter(is_active=True)
+    return queryset
+
+
+def effective_org_unit_ids(user: AbstractBaseUser | AnonymousUser) -> set[str]:
+    """Ids of every org unit ``user`` belongs to, plus all ancestors.
+
+    A grant on a manager unit must reach the staff units below it, so ancestry
+    is resolved here once per evaluation instead of per grant.
+    """
+    if not getattr(user, "is_active", False):
+        return set()
+    member_ids = set(
+        OrgUnitMembership.objects.filter(user_id=user.pk).values_list(
+            "org_unit_id", flat=True
+        )
+    )
+    if not member_ids:
+        return set()
+    # Walk parents in memory: org tables are small, so one lookup beats N+1
+    # queries down a deep chain.
+    parents = dict(
+        OrgUnit.objects.exclude(parent__isnull=True).values_list("id", "parent_id")
+    )
+    result = set(member_ids)
+    for unit_id in member_ids:
+        current = unit_id
+        seen = set()
+        while current in parents and current not in seen:
+            seen.add(current)
+            current = parents[current]
+            result.add(current)
+    return result
+
+
+def list_org_unit_member_ids(org_unit: OrgUnit) -> set[str]:
+    """Raw user ids in ``org_unit`` - resolve them via ``accounts.selectors``."""
+    return set(
+        OrgUnitMembership.objects.filter(org_unit=org_unit).values_list(
+            "user_id", flat=True
+        )
+    )

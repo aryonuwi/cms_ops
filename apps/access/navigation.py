@@ -19,6 +19,13 @@ NAVIGATION = [
         "order": 15,
         "items": [
             {
+                "title": _("Modules"),
+                "icon": "apps",
+                "link": reverse_lazy("admin:access_module_changelist"),
+                "permission": "apps.access.navigation.can_manage_access",
+                "feature": "access.modules",
+            },
+            {
                 "title": _("Features"),
                 "icon": "widgets",
                 "link": reverse_lazy("admin:access_feature_changelist"),
@@ -26,11 +33,32 @@ NAVIGATION = [
                 "feature": "access.features",
             },
             {
+                "title": _("Actions"),
+                "icon": "bolt",
+                "link": reverse_lazy("admin:access_action_changelist"),
+                "permission": "apps.access.navigation.can_manage_access",
+                "feature": "access.actions",
+            },
+            {
                 "title": _("Feature grants"),
                 "icon": "key",
                 "link": reverse_lazy("admin:access_featuregrant_changelist"),
                 "permission": "apps.access.navigation.can_manage_access",
                 "feature": "access.feature_grants",
+            },
+            {
+                "title": _("Org units"),
+                "icon": "account_tree",
+                "link": reverse_lazy("admin:access_orgunit_changelist"),
+                "permission": "apps.access.navigation.can_manage_access",
+                "feature": "access.org_units",
+            },
+            {
+                "title": _("Org unit memberships"),
+                "icon": "group_add",
+                "link": reverse_lazy("admin:access_orgunitmembership_changelist"),
+                "permission": "apps.access.navigation.can_manage_access",
+                "feature": "access.org_unit_memberships",
             },
             {
                 "title": _("Groups"),

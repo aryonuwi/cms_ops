@@ -55,3 +55,37 @@ def catalog_synced(
             "actions_updated": actions_updated,
         },
     )
+
+
+ORG_UNIT_CREATED = "access.org_unit_created"
+ORG_UNIT_MOVED = "access.org_unit_moved"
+ORG_UNIT_MEMBER_ADDED = "access.org_unit_member_added"
+ORG_UNIT_MEMBER_REMOVED = "access.org_unit_member_removed"
+
+
+def org_unit_created(*, org_unit_slug: str, parent_slug: str | None) -> DomainEvent:
+    return DomainEvent(
+        name=ORG_UNIT_CREATED,
+        payload={"org_unit_slug": org_unit_slug, "parent_slug": parent_slug},
+    )
+
+
+def org_unit_moved(*, org_unit_slug: str, parent_slug: str | None) -> DomainEvent:
+    return DomainEvent(
+        name=ORG_UNIT_MOVED,
+        payload={"org_unit_slug": org_unit_slug, "parent_slug": parent_slug},
+    )
+
+
+def org_unit_member_added(*, org_unit_slug: str, user_id: str) -> DomainEvent:
+    return DomainEvent(
+        name=ORG_UNIT_MEMBER_ADDED,
+        payload={"org_unit_slug": org_unit_slug, "user_id": user_id},
+    )
+
+
+def org_unit_member_removed(*, org_unit_slug: str, user_id: str) -> DomainEvent:
+    return DomainEvent(
+        name=ORG_UNIT_MEMBER_REMOVED,
+        payload={"org_unit_slug": org_unit_slug, "user_id": user_id},
+    )

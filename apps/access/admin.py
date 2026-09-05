@@ -11,7 +11,7 @@ from apps.accounts import selectors as accounts_selectors
 from apps.common.admin import BaseModelAdmin
 
 from . import services
-from .models import Action, Feature, FeatureGrant, Module
+from .models import Action, Feature, FeatureGrant, Module, OrgUnit, OrgUnitMembership
 
 # django.contrib.auth registers Group with the stock ModelAdmin; re-register it
 # here so grouping lives with the rest of access control and renders
@@ -129,3 +129,77 @@ class FeatureGrantAdmin(BaseModelAdmin):
     def delete_queryset(self, request, queryset):
         for grant in queryset:
             services.revoke_feature(grant=grant)
+
+
+@admin.register(OrgUnit)
+class OrgUnitAdmin(BaseModelAdmin):
+    list_display = ("name", "slug", "parent", "is_active", "order")
+    list_filter = ("is_active",)
+    search_fields = ("name", "slug")
+
+
+class OrgUnitMembershipForm(forms.ModelForm):
+    """Pick a user by name; stored as a plain id on the membership (R4)."""
+
+    user = forms.ModelChoiceField(
+        queryset=accounts_selectors.list_active_users(),
+        required=False,
+        label=_("user"),
+    )
+
+    class Meta:
+        model = OrgUnitMembership
+        fields = ("org_unit",)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance is not None and self.instance.user_id:
+            self.fields["user"].initial = accounts_selectors.get_user_by_id(
+                self.instance.user_id
+            )
+        # Membership identity is immutable once created - move someone by
+        # removing and re-adding. Disabling the fields on change prevents an
+        # edit from silently spawning a second row.
+        if self.instance is not None and self.instance.pk:
+            self.fields["org_unit"].disabled = True
+            self.fields["user"].disabled = True
+
+    def clean(self):
+        cleaned = super().clean()
+        if not self.instance.pk and not cleaned.get("user"):
+            raise ValidationError(_("Pick a user."))
+        return cleaned
+
+    def save(self, commit: bool = True):
+        user = self.cleaned_data.get("user")
+        if user is not None:
+            self.instance.user_id = user.pk
+        return super().save(commit=commit)
+
+
+@admin.register(OrgUnitMembership)
+class OrgUnitMembershipAdmin(BaseModelAdmin):
+    form = OrgUnitMembershipForm
+    list_display = ("org_unit", "member")
+    list_filter = ("org_unit",)
+    list_select_related = ("org_unit",)
+    search_fields = ("org_unit__name", "org_unit__slug")
+
+    @admin.display(description=_("member"))
+    def member(self, obj: OrgUnitMembership) -> str:
+        # Rendered through the accounts read API (R3) - no model import.
+        user = accounts_selectors.get_user_by_id(obj.user_id)
+        return str(user) if user is not None else str(obj.user_id)
+
+    def save_model(self, request, obj, form, change):
+        # R5: the write goes through the service so the event fires identically
+        # for admin and code.
+        membership = services.add_org_member(org_unit=obj.org_unit, user_id=obj.user_id)
+        obj.pk = membership.pk
+
+    def delete_model(self, request, obj):
+        services.remove_org_member(membership=obj)
+
+    def delete_queryset(self, request, queryset):
+        for membership in queryset:
+            services.remove_org_member(membership=membership)
