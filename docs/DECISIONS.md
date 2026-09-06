@@ -414,6 +414,45 @@ locmem default), hapus `REDIS_URL` dari `.env`/`.env.example`/README, hapus
 
 ---
 
+## ADR-016 — RBAC bertingkat: Module→Feature→Action + pohon organisasi
+
+**Tanggal:** 2026-09-05 · **Status:** Accepted · **Menggantikan sebagian ADR-012**
+
+**Konteks.** ADR-012 memberi dua level — `Feature` (menu) + `FeatureGrant`
+(group/user, allow/deny) — dengan enforcement terpisah lewat `has_perm`.
+Operator butuh akses bertingkat: katalog Module→Feature→Action yang di-scan
+dari kode, hierarki organisasi dinamis (supervisor→staff→manager), dan hak
+akses per posisi yang diekspresikan sebagai grant di level action (staff input,
+supervisor edit+approve). Enforcement yang hanya menyembunyikan menu terbukti
+tidak cukup — bug HIGH "grant/deny tidak memblokir URL".
+
+**Keputusan.**
+- Katalog berjenjang di `apps.access`: `Module` (slug == app name), `Feature`
+  (`module` tetap slug string), `Action` (slug global `<feature>.<code>`).
+  Di-scan dari deklarasi kode (`navigation.py` + `actions.py`) lewat
+  `sync_catalog` (idempotent, never-delete); `sync_features` jadi alias deprecated.
+- Pohon organisasi `OrgUnit` (parent self-FK, anti-siklus) +
+  `OrgUnitMembership` (`user_id` UUIDField per R4). Level/posisi = posisi di pohon.
+- `FeatureGrant` digeneralisasi: + `action` FK (nullable = seluruh feature),
+  grantee 3-arah (group/user/org_unit) dengan constraint DB.
+- Evaluasi tunggal `user_can(user, action_slug)`, fail-closed: scope action >
+  feature; grantee personal > org_unit (termasuk leluhur) > group; deny > allow.
+- **Enforcement**: admin feature module meng-override `has_*_permission` memanggil
+  `user_can`; `apps.access.*` + `auth.Group` superuser-only. Ini membalik
+  sebagian ADR-012 — visibility dan enforcement kini sama-sama lewat grant.
+
+**Konsekuensi.** Grant benar-benar memblokir URL, bukan hanya menyembunyikan
+menu. Operator non-superuser melihat admin kosong sampai `sync_catalog`
+dijalankan dan grant dibuat (default-deny). `apps.common` tetap R7-clean.
+Workflow approval (state machine record) tetap di luar scope — rencana terpisah.
+
+**Cara membalik.** Kembalikan `has_*_permission` tiap admin ke default
+`ModelAdmin`, lalu drop tabel `access_module`/`access_action`/`access_orgunit`/
+`access_orgunitmembership` dan kolom `action`/`org_unit` di `access_featuregrant`
+lewat migrasi baru (R10).
+
+---
+
 <!--
 Template entri baru:
 

@@ -114,11 +114,12 @@ ops_views/                    # repo root - semua perintah dijalankan dari sini
         ├── admin.py
         ├── migrations/
         └── tests/
-    └── access/               # hak akses menu: katalog Feature + grant
-        ├── models.py         # Feature, FeatureGrant (→ auth.Group | user UUID)
-        ├── services.py       # grant_feature / revoke_feature / sync_features
-        ├── selectors.py      # user_can_access - titik evaluasi tunggal
-        ├── management/commands/sync_features.py
+    └── access/               # hak akses bertingkat: katalog Module→Feature→Action + grant
+        ├── models.py         # Module, Feature, Action, FeatureGrant, OrgUnit, OrgUnitMembership
+        ├── actions.py        # deklarasi ACTIONS module ini (di-scan oleh sync_catalog)
+        ├── services.py       # grant_* / revoke_* / sync_catalog / pohon OrgUnit
+        ├── selectors.py      # user_can - titik evaluasi tunggal (fail-closed)
+        ├── management/commands/sync_catalog.py   # sync_features = alias deprecated
         └── ...
 ```
 
@@ -183,23 +184,30 @@ yang lain, persis seperti perilaku message broker. Saat pindah ke microservice,
 - **Dependency**: setiap module boleh bergantung pada `apps.common`.
   `apps.common` **tidak boleh** bergantung pada module manapun. Graf-nya asiklik.
 
-### Hak akses menu (access control)
+### Hak akses bertingkat (access control)
 
-`apps.access` mengatur siapa boleh melihat menu mana — per grup
-(`auth.Group`) maupun perorangan (grant personal). Kuncinya:
+`apps.access` mengatur siapa boleh melihat dan memakai menu/aksi mana, lewat
+katalog bertingkat **Module → Feature → Action** plus pohon organisasi
+(`OrgUnit`). Kuncinya:
 
-- Tiap module mendeklarasikan key `feature` (slug unik) pada item
-  `navigation.py`-nya; `manage.py sync_features` mencatatnya ke katalog
-  `Feature` (idempotent, tidak menyentuh kolom operator).
-- Grant dikelola lewat admin **Access → Feature grants**: satu keputusan =
-  feature + (group **atau** user) + efek `allow`/`deny`.
-- Evaluasi tunggal di `apps.access.selectors.user_can_access` — fail-closed:
-  default deny, `deny` > `allow` se-level, personal > group, superuser
-  bypass, user non-aktif ditolak semua.
-- Visibility dan enforcement tidak saling menggantikan: `has_perm` tetap
-  yang menjaga endpoint; `Feature.required_permission` (opsional)
-  menjembatani keduanya supaya tidak ada "menu terlihat tapi 403".
-  Lihat [ADR-012](docs/DECISIONS.md#adr-012--hak-akses-menu-berbasis-group--grant-personal-appsaccess).
+- Tiap module mendeklarasikan menu di `navigation.py` (key `feature`) dan
+  aksi-aksinya di `actions.py`; `manage.py sync_catalog` men-scan keduanya
+  menjadi katalog `Module`/`Feature`/`Action` (idempotent, never-delete —
+  kolom operator tidak disentuh). `sync_features` tetap tersedia sebagai
+  alias deprecated.
+- Pohon organisasi `OrgUnit` (parent → child, anti-siklus) + membership
+  `OrgUnitMembership`: posisi seseorang = posisinya di pohon. Grant bisa
+  diberi ke **group**, **user**, atau **org unit** (constraint 3-arah di DB).
+- Evaluasi tunggal di `apps.access.selectors.user_can(user, action_slug)` —
+  fail-closed dengan matriks precedensi: action > feature, personal >
+  org unit (termasuk leluhur) > group, `deny` > `allow`, superuser bypass,
+  user non-aktif ditolak semua.
+- Enforcement nyata: admin tiap feature module meng-override `has_*_permission`
+  memanggil `user_can`, jadi staff tanpa akses mendapat 403 — bukan sekadar
+  menu disembunyikan. `apps.access.*` dan `auth.Group` superuser-only
+  (menutup celah self-grant).
+  Lihat [ADR-016](docs/DECISIONS.md#adr-016--rbac-bertingkat-modulefeatureaction--pohon-organisasi)
+  (menggantikan sebagian [ADR-012](docs/DECISIONS.md#adr-012--hak-akses-menu-berbasis-group--grant-personal-appsaccess)).
 
 Status akun user kini eksplisit lewat `User.Status` (1 = aktif, 0 = nonaktif,
 2 = suspend). `is_active` diturunkan dari status tersebut (satu titik invariant
@@ -341,7 +349,7 @@ Nilai default untuk development sudah terisi di `.env.example`:
 | | |
 |---|---|
 | Email | `admin@ops.local` |
-| Password | ` ` |
+| Password | `OpsViews!Dev2026` |
 
 > **Kredensial ini bukan rahasia.** Nilainya ada di `.env.example` yang
 > ter-commit, jadi siapa pun yang bisa membaca repo tahu isinya. Aman untuk
@@ -697,8 +705,8 @@ NAVIGATION = [{
 }]
 ```
 
-Lalu jalankan `env/bin/python manage.py sync_features` supaya feature baru
-masuk katalog akses dan bisa di-grant ke group/user.
+Lalu jalankan `env/bin/python manage.py sync_catalog` supaya feature baru
+masuk katalog akses dan bisa di-grant ke group/user/org unit.
 
 **5. Daftarkan** — dua baris, selesai:
 
