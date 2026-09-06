@@ -246,7 +246,11 @@ make seed                          # akun admin dari DJANGO_SEED_ADMIN_* di .env
 #    atau: make superuser          # interaktif, diminta EMAIL (bukan username)
 
 # 6. Jalankan
-make run                           # atau: make run PORT=8100
+make run                           # default port 8000
+#    Mesin ini sering menjalankan beberapa project sekaligus, jadi 8000 bisa
+#    saja sudah dipakai. Kalau `make run` gagal dengan "That port is already
+#    in use", cek dulu (mis. `lsof -i :8000`) lalu pakai port lain:
+make run PORT=8100
 ```
 
 Kalau lebih suka PostgreSQL native daripada Docker, lihat
@@ -257,12 +261,14 @@ di `.env` — sisanya sama.
 > selain PostgreSQL, proses **menolak start** — itu disengaja, lihat
 > [ADR-002](docs/DECISIONS.md#adr-002--postgresql-satu-satunya-engine-tanpa-fallback-sqlite).
 
+Ganti `8000` dengan `PORT` yang benar-benar dipakai kalau tidak memakai default:
+
 | URL | Isi |
 |---|---|
 | http://127.0.0.1:8000/ | Landing page (publik, tanpa login) |
-| http://127.0.0.1:8000/admin/ | Admin panel (Unfold) |
+| http://127.0.0.1:8000/admin/ | Admin panel (Unfold) — login dengan akun dari `make seed` atau `make seed-dummy` |
 | http://127.0.0.1:8000/health/live/ | Liveness probe |
-| http://127.0.0.1:8000/health/ready/ | Readiness probe (cek koneksi DB) |
+| http://127.0.0.1:8000/health/ready/ | Readiness probe (cek koneksi tiap database + tiap cache — lihat bagian [Cache](#cache)) |
 
 Landing page dan admin memakai bahasa visual yang sama. Tampilan admin
 di-override lewat `UNFOLD["STYLES"]` yang menunjuk ke
@@ -274,13 +280,15 @@ spesifisitas, bukan `!important`.
 Perintah harian (`make help` untuk daftar lengkap):
 
 ```bash
-make db-status / db-logs   # container PostgreSQL bersama
-make migrations            # setelah ubah model
+make db-status / db-logs       # container PostgreSQL bersama
+make redis-status / redis-logs # container Redis bersama (opsional - lihat Cache)
+make migrations                # setelah ubah model
 make migrate
-make seed                  # akun admin pertama (idempotent)
-make test                  # test suite
-make dbshell               # psql ke database aktif
-make verify                # GATE: check + migrasi + test + audit keamanan
+make seed                      # akun admin pertama (idempotent)
+make seed-dummy                # akun test non-admin untuk uji hak akses (idempotent)
+make test                      # test suite
+make dbshell                   # psql ke database aktif
+make verify                    # GATE: check + migrasi + test + audit keamanan
 ```
 
 `make verify` adalah yang harus hijau sebelum sebuah perubahan dianggap
@@ -303,12 +311,16 @@ asli di server). **Tidak ada satu pun secret di dalam kode.**
 | `DJANGO_SITE_TITLE` | `CMS Ops` | Judul admin (tab browser & header sidebar) — alias publik `cms_ops` |
 | `DJANGO_SEED_ADMIN_EMAIL` | kosong | Email admin pertama untuk `make seed` |
 | `DJANGO_SEED_ADMIN_PASSWORD` | kosong | Password admin pertama — **ganti di luar lokal** |
+| `DJANGO_SEED_DUMMY_EMAIL` | kosong | Email akun test non-admin untuk `make seed-dummy` |
+| `DJANGO_SEED_DUMMY_PASSWORD` | kosong | Password akun test non-admin — **ganti di luar lokal** |
 | `DJANGO_CSRF_TRUSTED_ORIGINS` | kosong | Wajib diisi kalau pakai HTTPS + domain |
 | `DATABASE_URL` | — **wajib** | Harus `postgres://...`. Engine lain ditolak |
 | `DATABASE_CONN_MAX_AGE` | `60` (local) / `600` (prod) | Connection pooling |
 | `DATABASE_SSLMODE` | `require` | `disable` hanya untuk Postgres di loopback |
 | `DATABASE_CONNECT_TIMEOUT` | `10` | Detik sebelum menyerah menyambung |
 | `DATABASE_APPLICATION_NAME` | `ops_views` | Label di `pg_stat_activity` |
+| `REDIS_URL` | kosong → locmem | `redis://:pass@host:6379/DB_INDEX` |
+| `CACHE_KEY_PREFIX` | `ops_views` | Namespace key di Redis bersama — lihat ADR-015 |
 | `EMAIL_URL` | `consolemail://` | `smtp://user:pass@host:587/?tls=True` |
 | `DJANGO_TIME_ZONE` | `Asia/Jakarta` | |
 | `DJANGO_LOG_LEVEL` | `INFO` | |
@@ -329,7 +341,7 @@ Nilai default untuk development sudah terisi di `.env.example`:
 | | |
 |---|---|
 | Email | `admin@ops.local` |
-| Password | `OpsViews!Dev2026` |
+| Password | ` ` |
 
 > **Kredensial ini bukan rahasia.** Nilainya ada di `.env.example` yang
 > ter-commit, jadi siapa pun yang bisa membaca repo tahu isinya. Aman untuk
@@ -359,6 +371,42 @@ Kalau memang harus non-interaktif di server (mis. provisioning otomatis), isi
 `DJANGO_SEED_ADMIN_*` dengan nilai yang di-generate, jalankan
 `manage.py seed_admin --force`, lalu **hapus kedua baris itu dari environment**
 begitu akun terbentuk.
+
+### Akun dummy — untuk menguji hak akses menu (seeder)
+
+`make seed` selalu membuat **superuser**, dan superuser **selalu bypass**
+`apps.access.FeatureGrant` ([ADR-012](docs/DECISIONS.md#adr-012--hak-akses-menu-berbasis-group--grant-personal-appsaccess)) —
+jadi login sebagai admin tidak bisa dipakai untuk memverifikasi menu mana
+yang benar-benar tampil/tersembunyi untuk grup atau grant personal tertentu.
+`make seed-dummy` (= `manage.py seed_dummy`) mengisi celah itu: akun **staff,
+bukan superuser**, tunduk penuh ke evaluasi akses seperti operator biasa.
+
+```bash
+make seed-dummy
+# dummy: dummy@ops.local dibuat - belum ada akses menu, beri lewat admin (Access -> Feature grants)
+```
+
+Nilai default untuk development sudah terisi di `.env.example`:
+
+| | |
+|---|---|
+| Email | `dummy@ops.local` |
+| Password | `OpsViews!Dummy2026` |
+
+Akun ini **tidak otomatis punya akses ke menu apa pun** — setelah `make
+seed-dummy`, beri grant lewat admin: **Access → Feature grants**, pilih
+feature, grantee `User` = akun dummy (atau masukkan dummy ke sebuah `Group`
+lalu grant ke grup itu), efek `allow`. Login sebagai dummy di tab
+private/browser lain untuk melihat sidebar-nya berubah sesuai grant yang
+diberikan.
+
+Sifatnya sama seperti seeder admin: idempotent, lewat `services.register_user`
+(R5, jadi validator password & event `accounts.user_registered` tetap jalan),
+fail-closed kalau `DJANGO_SEED_DUMMY_*` kosong, dan menolak jalan saat
+`DEBUG=False` kecuali `--force`.
+
+> **Kredensial ini juga bukan rahasia** — sama seperti akun admin di atas,
+> nilainya publik lewat `.env.example`. Aman untuk mesin lokal saja.
 
 ---
 
@@ -504,6 +552,71 @@ curl -s localhost:8000/health/ready/
 ```bash
 pg_dump -Fc -U ops_user ops_views > ops_views_$(date +%F).dump
 pg_restore -U ops_user -d ops_views --clean ops_views_2026-09-03.dump
+```
+
+---
+
+## Cache
+
+**Redis, dengan fallback locmem kalau `REDIS_URL` kosong.** Berbeda dari
+`DATABASE_URL`, cache tidak fail-closed — dev/CI tanpa Redis tetap bisa
+`manage.py check`/`test` karena caching sifatnya optimisasi, bukan prasyarat
+boot. Detail keputusan di
+[ADR-015](docs/DECISIONS.md#adr-015--redis-untuk-cache-lewat-container-bersama).
+
+Django membaca backend cache lewat `env.cache_url()` (django-environ), yang
+otomatis memilih `django.core.cache.backends.redis.RedisCache` bawaan
+Django 4+ untuk skema `redis://` — **tidak butuh** package `django-redis`,
+cukup `redis` (redis-py) di `requirements/base.txt`.
+
+```bash
+# lokal (container `redis` bersama, port host 6379)
+REDIS_URL=redis://:PASSWORD@127.0.0.1:6379/1
+
+# kosong -> CACHES["default"] jadi locmem (in-process, per-worker)
+```
+
+### Redis lokal — container bersama (cara yang dipakai project ini)
+
+Sama seperti PostgreSQL ([ADR-011](docs/DECISIONS.md#adr-011--memakai-container-postgresql-bersama-bukan-container-per-project)),
+project ini **tidak menjalankan container Redis-nya sendiri**. Ia memakai
+container `redis` yang sudah berjalan di mesin development dan dipakai
+bersama project lain.
+
+| | |
+|---|---|
+| Nama container | `redis` |
+| Image | `redis:7-alpine` |
+| Port di host | `6379` |
+| Auth | `requirepass` aktif — password disetel saat container dibuat |
+
+Isolasi antar project dijaga lewat **nomor database Redis** (bukan `0`,
+default) plus **`CACHE_KEY_PREFIX`** (default `ops_views`, diset eksplisit
+sebagai `KEY_PREFIX` di `base.py` — lihat catatan di ADR-015 soal kenapa
+bukan lewat query string `REDIS_URL`) — bukan container maupun instance
+terpisah. Redis tidak punya konsep role/schema seperti PostgreSQL, jadi ini
+isolasi "cukup baik", bukan mutlak: project lain yang memakai container yang
+sama tetap bisa `SELECT`/`FLUSHDB` nomor database mana pun kalau tahu
+passwordnya. Jangan simpan apa pun yang sensitif atau yang tidak boleh hilang
+di cache ini — kalau butuh penyimpanan tahan-hilang, pakai PostgreSQL.
+
+```bash
+make redis-status   # container jalan & healthy? (opsional - cache fallback ke locmem)
+make redis-logs      # ikuti lognya
+docker start redis   # kalau sedang mati
+```
+
+> Kalau container `redis` dipakai bersama project lain, **jangan** jalankan
+> `docker rm`, `docker volume rm`, atau `FLUSHALL` — kamu akan menghapus data
+> project lain. Untuk membuang cache project ini saja, dari dalam Django:
+> `from django.core.cache import cache; cache.clear()` (hanya menghapus key
+> berprefix `ops_views` di database yang dikonfigurasi).
+
+Verifikasi koneksi kapan saja:
+
+```bash
+curl -s localhost:8000/health/ready/
+# {"status": "ok", "checks": {"database:default": "ok", "cache:default": "ok"}}
 ```
 
 ---

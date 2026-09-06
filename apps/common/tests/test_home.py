@@ -36,3 +36,30 @@ class HomePageTests(TestCase):
         # Probe orchestrator memakai path harfiah, bukan reverse().
         self.assertEqual(reverse("common:liveness"), "/health/live/")
         self.assertEqual(reverse("common:readiness"), "/health/ready/")
+
+    @override_settings(CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}})
+    def test_readiness_reports_cache_ok_when_reachable(self):
+        response = self.client.get(reverse("common:readiness"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["checks"]["cache:default"], "ok")
+
+    @override_settings(
+        CACHES={
+            "default": {
+                "BACKEND": "django.core.cache.backends.redis.RedisCache",
+                # Port tidak dipakai siapa pun di loopback - selalu connection
+                # refused, tanpa bergantung pada Redis sungguhan hidup/mati.
+                "LOCATION": "redis://127.0.0.1:1/0",
+            }
+        }
+    )
+    def test_readiness_reports_cache_error_without_flipping_overall_health(self):
+        # Cache itu opsional (ADR-015): Redis down tidak boleh membuat probe
+        # readiness gagal dan menjatuhkan traffic yang sebenarnya masih bisa
+        # dilayani lewat database.
+        response = self.client.get(reverse("common:readiness"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "ok")
+        self.assertTrue(response.json()["checks"]["cache:default"].startswith("error:"))

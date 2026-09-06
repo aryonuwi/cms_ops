@@ -176,7 +176,36 @@ Untuk production yang wajib ada: **jangan beri `default`** — biarkan gagal sta
 
 ---
 
-## 4. Gaya menulis kode
+## 4. Gaya menulis kode & Penerapan Prinsip SOLID
+
+### Prinsip SOLID dalam Arsitektur Modular Ini
+
+- **S — Single Responsibility Principle (SRP):**
+  Pemisahan file modul bersifat ketat: `models.py` hanya mendefinisikan skema data;
+  `services.py` hanya menangani operasi WRITE, transaksi DB, dan publikasi event;
+  `selectors.py` hanya operasi READ/query tanpa efek samping; `handlers.py` hanya
+  berlangganan event; `admin.py` hanya antarmuka Unfold. Fungsi service atau selector
+  tidak boleh menjadi god-function — pisahkan menjadi fungsi-fungsi spesifik per use-case.
+- **O — Open/Closed Principle (OCP):**
+  Modul terbuka untuk ekstensi namun tertutup untuk modifikasi dari luar. Penambahan
+  efek samping lintas modul diintegrasikan melalui event bus (`publish` dan `handlers.py`),
+  bukan dengan mengubah service modul lain. Pendaftaran navigasi terdistribusi via
+  `navigation.py` tanpa registry terpusat (R8).
+- **L — Liskov Substitution Principle (LSP):**
+  Semua model turunan wajib mematuhi kontrak `BaseModel` (UUID pk, `created_at`,
+  `updated_at`). Semua admin model wajib mewarisi `BaseModelAdmin` dari `apps.common.admin`
+  agar konsistensi tema Unfold terjaga.
+- **I — Interface Segregation Principle (ISP):**
+  Antarmuka publik di `selectors.py` dan `services.py` dibuat ramping, spesifik, dan
+  terfokus pada kebutuhan pemanggil. Selalu gunakan keyword-only arguments (`*,`) dan
+  type hints agar parameter eksplisit dan tidak memaksa pemanggil mengirim dependensi tak perlu.
+- **D — Dependency Inversion Principle (DIP):**
+  Modul tingkat tinggi tidak bergantung pada detail internal model atau tabel modul lain.
+  Dilarang import model atau ForeignKey lintas modul (R3 & R4); komunikasi hanya lewat
+  kontrak fungsi `selectors`, `services`, atau event bus. `apps.common` tidak pernah
+  bergantung pada modul fitur mana pun (R7).
+
+### Konvensi Penulisan
 
 - Ikuti gaya file di sekitarnya. Jangan bawa konvensi dari project lain.
 - Komentar menjelaskan **kenapa**, bukan **apa**. Jangan komentari kode yang
@@ -190,6 +219,7 @@ Untuk production yang wajib ada: **jangan beri `default`** — biarkan gagal sta
 - Minimum yang didukung: Python 3.12, PostgreSQL 15. Jangan pakai fitur di luar
   itu tanpa menaikkan angkanya di README dan `docs/DECISIONS.md`.
 - Nama event: `<module>.<past_tense>` — `accounts.user_registered`.
+
 
 ---
 
@@ -314,3 +344,52 @@ itu sudah pernah terjadi dan itulah sebabnya file ini ada.
 
 **Jangan** simpan konteks project hanya di memory pribadi agent, di komentar
 chat, atau di nama branch. Konteks yang tidak ada di repo dianggap tidak ada.
+
+---
+
+## 10. Siklus Code Review & Quality Control (QC)
+
+Setiap perubahan fitur non-trivial wajib melewati siklus review untuk menjaga
+kualitas kode (clean code, SOLID), konsistensi arsitektur (R0–R10), dan keamanan
+sistem sebelum dinyatakan selesai.
+
+### Peran dan Tanggung Jawab
+
+| Peran | Tugas Utama | Batasan Keras |
+|---|---|---|
+| **Lead** | Membuat rencana (`Plans/`), menganalisa review, memberi arahan prioritas perbaikan | Tidak menulis kode aplikasi |
+| **Coder** | Menulis kode sesuai rencana, mengeksekusi revisi dari review | Tidak `git push` otomatis; tidak merancang ulang |
+| **Reviewer** | Mengaudit kepatuhan arsitektur, security, clean code, dan verifikasi gate | Tidak mengubah file kode aplikasi; tidak commit/push |
+
+### Alur Kerja & Status Note di Obsidian
+
+Setiap proses review dicatat pada vault Obsidian di folder `ops_views/Reviews/`
+menggunakan template `_templates/review.md`:
+
+```
+ops_views/Reviews/YYYY-MM-DD-<slug>-<feature>-review.md
+```
+
+Status note review berjalan dalam 4 tahap:
+
+1. `pending-lead` (Reviewer):
+   Reviewer mengaudit diff terhadap rencana, kepatuhan SOLID, standar keamanan,
+   dan aturan repositori, lalu menjalankan gate verifikasi read-only (perintah test,
+   linter, dan check resmi repositori), mencatat temuan terstruktur di tabel
+   *Temuan & Action Items*, dan mengatur status ke `pending-lead`.
+2. `ready-for-coder` (Lead):
+   Lead menganalisa temuan, memvalidasi blocker vs minor, mengisi *Catatan & Analisa Lead*
+   dengan arahan solusi konkret, dan mengatur status ke `ready-for-coder`.
+3. `revised` (Coder):
+   Coder mengerjakan perbaikan, menjalankan gate verifikasi repositori hingga hijau,
+   melakukan commit lokal, meminta konfirmasi `git push` dari user, lalu mencatat commit hash &
+   status push di *Riwayat Revisi Coder*, dan mengatur status ke `revised`.
+4. `closed` (Reviewer):
+   Reviewer melakukan verifikasi ulang akhir terhadap commit perbaikan dan test suite.
+   Jika seluruh blocker tuntas, status diubah menjadi `closed`.
+
+### Kebijakan Git Push pada Revisi
+Coder dilarang menjalankan `git push` secara otomatis. Coder membuat commit lokal,
+menampilkan instruksi push manual untuk user (`git push origin <branch>`), dan baru
+mencatat konfirmasi push ke note Obsidian setelah user menyatakan push selesai.
+

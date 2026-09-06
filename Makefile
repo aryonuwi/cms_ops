@@ -9,7 +9,7 @@ PY := $(shell \
 	else echo "MISSING"; fi)
 
 .DEFAULT_GOAL := help
-.PHONY: help guard db-status db-logs install migrations migrate superuser run shell dbshell test check deploy-check verify
+.PHONY: help guard db-status db-logs redis-status redis-logs install migrations migrate superuser seed seed-dummy run shell dbshell test check deploy-check verify
 
 guard:
 	@if [ "$(PY)" = "MISSING" ]; then \
@@ -34,6 +34,20 @@ db-status:  ## Cek container PostgreSQL bersama sedang jalan
 db-logs:  ## Ikuti log PostgreSQL
 	docker logs -f $(PG_CONTAINER)
 
+# Project ini TIDAK punya container Redis sendiri - memakai container `redis`
+# bersama yang sudah jalan di mesin ini. Lihat README ("Cache").
+REDIS_CONTAINER ?= redis
+
+redis-status:  ## Cek container Redis bersama sedang jalan (opsional - cache fallback ke locmem)
+	@if [ "$$(docker inspect -f '{{.State.Running}}' $(REDIS_CONTAINER) 2>/dev/null)" != true ]; then \
+		echo "Container '$(REDIS_CONTAINER)' tidak jalan. Cache akan fallback ke locmem."; \
+		echo "Hidupkan dengan:  docker start $(REDIS_CONTAINER)"; \
+		exit 1; fi
+	@echo "$(REDIS_CONTAINER): $$(docker inspect -f '{{.State.Status}}{{if .State.Health}} ({{.State.Health.Status}}){{end}}' $(REDIS_CONTAINER))"
+
+redis-logs:  ## Ikuti log Redis
+	docker logs -f $(REDIS_CONTAINER)
+
 install: guard  ## Pasang dependency development
 	$(PY) -m pip install -r requirements/local.txt
 
@@ -48,6 +62,9 @@ superuser: guard  ## Buat akun admin (interaktif, diminta email)
 
 seed: guard  ## Buat akun admin pertama dari DJANGO_SEED_ADMIN_* di .env
 	$(PY) manage.py seed_admin
+
+seed-dummy: guard  ## Buat akun test non-admin dari DJANGO_SEED_DUMMY_* di .env
+	$(PY) manage.py seed_dummy
 
 # Mesin ini menjalankan beberapa app; 8000 sering sudah dipakai.
 #   make run PORT=8100

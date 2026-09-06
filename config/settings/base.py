@@ -144,6 +144,26 @@ DATABASES["default"]["TEST"] = {"NAME": env("DATABASE_TEST_NAME", default=None)}
 
 
 # ---------------------------------------------------------------------------
+# Cache
+# ---------------------------------------------------------------------------
+# Redis kalau REDIS_URL diisi - container `redis` bersama di mesin lokal,
+# managed Redis di production. Lihat README bagian "Cache" dan
+# ADR-015. Fallback locmem (in-process, per-worker) kalau REDIS_URL kosong,
+# supaya `manage.py check`/`test` tetap jalan di mesin tanpa Redis - caching
+# itu sendiri tetap opsional, bukan prasyarat boot seperti DATABASE_URL.
+
+CACHES = {"default": env.cache_url("REDIS_URL", default="locmemcache://")}
+
+# Diset eksplisit, bukan lewat query string `?key_prefix=` di REDIS_URL:
+# django-environ 0.14.0 menulis key itu sebagai `key_prefix` huruf kecil di
+# dict CACHES, tapi Django hanya membaca `KEY_PREFIX` huruf besar - jadi lewat
+# URL, prefix itu diam-diam tidak pernah terpakai. Prefix ini yang menjaga
+# key project ini tidak bentrok dengan project lain di container Redis
+# bersama (ADR-015).
+CACHES["default"]["KEY_PREFIX"] = env("CACHE_KEY_PREFIX", default="ops_views")
+
+
+# ---------------------------------------------------------------------------
 # Authentication
 # ---------------------------------------------------------------------------
 # A project-owned user model from day one; swapping it after the first
@@ -169,6 +189,12 @@ LOGIN_REDIRECT_URL = "admin:index"
 # perintahnya berhenti dengan pesan jelas kalau keduanya kosong.
 SEED_ADMIN_EMAIL = env("DJANGO_SEED_ADMIN_EMAIL", default="")
 SEED_ADMIN_PASSWORD = env("DJANGO_SEED_ADMIN_PASSWORD", default="")
+
+# Akun staff non-superuser, dipakai `manage.py seed_dummy` untuk menguji hak
+# akses menu (apps.access) secara manual - superuser di atas selalu bypass
+# FeatureGrant (ADR-012), jadi tidak bisa dipakai memverifikasi pembatasan.
+SEED_DUMMY_EMAIL = env("DJANGO_SEED_DUMMY_EMAIL", default="")
+SEED_DUMMY_PASSWORD = env("DJANGO_SEED_DUMMY_PASSWORD", default="")
 
 
 # ---------------------------------------------------------------------------

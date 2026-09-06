@@ -359,6 +359,61 @@ jalankan migrasinya sebagai proyek terpisah — bukan efek samping dari alias.
 
 ---
 
+## ADR-015 — Redis untuk cache lewat container bersama
+
+**Tanggal:** 2026-09-04 · **Status:** Accepted
+
+**Konteks.** Project butuh cache backend nyata (bukan cuma locmem per-worker)
+untuk hal-hal yang harus konsisten lintas worker/proses — mis. rate limiting
+atau cache query yang mahal, seiring modul baru ditambahkan. Mesin
+development sudah menjalankan container `redis` (`redis:7-alpine`, port 6379,
+`requirepass` aktif) dipakai bersama project lain — pola yang sama dengan
+`postgres` di [ADR-011](#adr-011--memakai-container-postgresql-bersama-bukan-container-per-project).
+Django 4+ sudah punya `RedisCache` bawaan
+(`django.core.cache.backends.redis.RedisCache`), jadi tidak ada alasan
+menambah dependency `django-redis` hanya untuk backend cache sederhana.
+
+**Keputusan.**
+- Cache dikonfigurasi lewat satu variable, `REDIS_URL`, diparse
+  `env.cache_url()` (django-environ) di [base.py](../config/settings/base.py).
+  Skema `redis://` otomatis resolve ke `RedisCache` bawaan Django karena
+  `django-redis` sengaja tidak diinstal (lihat `compat.choose_rediscache_driver`
+  di django-environ).
+- **Tidak fail-closed** seperti `DATABASE_URL`: `REDIS_URL` kosong → fallback
+  `locmemcache://`. Caching itu optimisasi, bukan prasyarat boot — mesin/CI
+  tanpa Redis tetap lolos `manage.py check`/`test`.
+- Isolasi dari project lain di container bersama lewat **nomor database
+  Redis** (bukan `0`) + **`KEY_PREFIX`** (default `"ops_views"`, override
+  lewat `CACHE_KEY_PREFIX`), bukan container terpisah — karena Redis tidak
+  punya konsep role/schema seperti PostgreSQL. `KEY_PREFIX` diset **eksplisit
+  di `base.py`** setelah `env.cache_url()`, bukan lewat query string
+  `?key_prefix=` di `REDIS_URL` — django-environ 0.14.0 menulis key dari
+  query string itu sebagai `key_prefix` huruf kecil di dict `CACHES`, sementara
+  Django hanya membaca `KEY_PREFIX` huruf besar di level itu, jadi lewat URL
+  prefix-nya diam-diam tidak pernah terpakai (dicoba dan dikonfirmasi manual
+  lewat `cache.make_key()` sebelum entri ini ditulis).
+- `apps/common/views.readiness` melaporkan status tiap `CACHES` alias, tapi
+  kegagalannya **tidak** menjatuhkan `healthy` — Redis down tidak boleh
+  membuat pod keluar dari rotasi kalau database (yang benar-benar dibutuhkan)
+  masih sehat.
+
+**Konsekuensi.** Satu instance Redis untuk semua project di mesin ini —
+`docker rm`, `docker volume rm`, atau `FLUSHALL` sembarangan menjatuhkan
+project lain, dilarang di AGENTS.md §8 (sama seperti `postgres`). Isolasi
+lewat nomor database + prefix lebih lemah dari isolasi role PostgreSQL:
+project lain yang tahu password container tetap bisa `FLUSHDB` nomor database
+manapun. Cache karena itu tidak boleh dipakai untuk apa pun yang sensitif atau
+yang tidak boleh hilang. Menambah cache backend baru berarti menambah
+dependency (`redis` di `requirements/base.txt`) — sudah disetujui user sesuai
+gerbang di AGENTS.md §6.
+
+**Cara membalik.** Hapus `CACHES` dari `base.py` (Django jatuh balik ke
+locmem default), hapus `REDIS_URL` dari `.env`/`.env.example`/README, hapus
+`redis` dari `requirements/base.txt`, dan hapus blok cache di
+`apps/common/views.readiness`.
+
+---
+
 <!--
 Template entri baru:
 
