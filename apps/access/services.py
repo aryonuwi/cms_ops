@@ -63,37 +63,44 @@ def grant_feature(
     if action is not None and action.feature_id != feature.pk:
         raise ValueError("The action must belong to the granted feature.")
 
+    common_defaults = {
+        "effect": effect,
+        "is_deleted": False,
+        "deleted_at": None,
+        "deleted_by_id": None,
+    }
+
     if grantee_type == FeatureGrant.GranteeType.GROUP:
         if group is None:
             raise ValueError("A group grant requires a group.")
-        grant, _created = FeatureGrant.objects.update_or_create(
+        grant, _created = FeatureGrant.all_objects.update_or_create(
             feature=feature,
             action=action,
             grantee_type=grantee_type,
             group=group,
-            defaults={"effect": effect, "user_id": None, "org_unit": None},
+            defaults={**common_defaults, "user_id": None, "org_unit": None},
         )
         grantee_id = str(group.pk)
     elif grantee_type == FeatureGrant.GranteeType.USER:
         if user_id is None:
             raise ValueError("A personal grant requires a user_id.")
-        grant, _created = FeatureGrant.objects.update_or_create(
+        grant, _created = FeatureGrant.all_objects.update_or_create(
             feature=feature,
             action=action,
             grantee_type=grantee_type,
             user_id=user_id,
-            defaults={"effect": effect, "group": None, "org_unit": None},
+            defaults={**common_defaults, "group": None, "org_unit": None},
         )
         grantee_id = str(user_id)
     elif grantee_type == FeatureGrant.GranteeType.ORG_UNIT:
         if org_unit is None:
             raise ValueError("An org-unit grant requires an org_unit.")
-        grant, _created = FeatureGrant.objects.update_or_create(
+        grant, _created = FeatureGrant.all_objects.update_or_create(
             feature=feature,
             action=action,
             grantee_type=grantee_type,
             org_unit=org_unit,
-            defaults={"effect": effect, "group": None, "user_id": None},
+            defaults={**common_defaults, "group": None, "user_id": None},
         )
         grantee_id = str(org_unit.pk)
     else:
@@ -402,9 +409,22 @@ def move_org_unit(
 @transaction.atomic
 def add_org_member(*, org_unit: OrgUnit, user_id: str) -> OrgUnitMembership:
     """Add a user to an org unit once, announcing only a real change."""
-    membership, created = OrgUnitMembership.objects.get_or_create(
+    membership = OrgUnitMembership.all_objects.filter(
         org_unit=org_unit, user_id=user_id
-    )
+    ).first()
+    if membership is None:
+        membership = OrgUnitMembership.objects.create(
+            org_unit=org_unit, user_id=user_id
+        )
+        created = True
+    else:
+        created = membership.is_deleted
+        if membership.is_deleted:
+            membership.is_deleted = False
+            membership.deleted_at = None
+            membership.deleted_by_id = None
+            membership.save(update_fields=["is_deleted", "deleted_at", "deleted_by_id", "updated_at"])
+
     if created:
         transaction.on_commit(
             lambda: publish(

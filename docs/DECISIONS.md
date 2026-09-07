@@ -453,6 +453,39 @@ lewat migrasi baru (R10).
 
 ---
 
+## ADR-017 — RBAC UX hardening, soft-delete & audit trail, catalog guard, dan dynamic 2FA TOTP
+
+**Tanggal:** 2026-09-06 · **Status:** Accepted
+
+**Konteks.**
+1. Pengguna awam kesulitan memahami workflow konfigurasi RBAC (siapa masuk ke grup mana, dan grup mana mendapat akses fitur atau aksi apa). Pemilihan `action` pada `FeatureGrantForm` sebelumnya tidak terfilter berdasarkan fitur yang dipilih.
+2. `Module`, `Feature`, dan `Action` sebelumnya dapat ditambahkan atau dihapus manual di dashboard admin, yang berisiko merusak sinkronisasi dengan deklarasi kode (`navigation.py` dan `actions.py`).
+3. Akun superadmin `admin@ops.local` dan superadmin tunggal rentan terhapus tidak sengaja sehingga berpotensi mengunci akses sistem.
+4. Diperlukan kemudahan pengeditan kredensial pengguna (email dan password) dari form user admin dengan tetap mematuhi isolasi R5 (write via service layer).
+5. Kebutuhan keamanan autentikasi dua faktor (2FA Google Authenticator - RFC 6238 TOTP) dengan enkripsi simetris rahasia di database, disertai perlindungan tamper dinamis per user (jika ciphertext dimanipulasi langsung di DB, OTP otomatis ditolak dan 2FA di-reset).
+6. Konfirmasi audit trail dan integritas data: semua tabel wajib mencatat siapa dan kapan dibuat/diperbarui, serta tidak ada penghapusan fisik (soft-delete).
+
+**Keputusan.**
+- **Audit Trail & Soft-Delete universal**:
+  `BaseModel` di `apps.common.models` ditambahkan `created_by_id`, `updated_by_id`, `is_deleted`, `deleted_at`, dan `deleted_by_id`. `SoftDeleteManager` dan `SoftDeleteQuerySet` memfilter `is_deleted=False` secara transparan pada query default; `.all_objects` mempertahankan akses audit penuh. `BaseModelAdmin` secara otomatis menyuntikkan user pembuat/pembaru saat save dan mengubah aksi delete menjadi soft-delete.
+- **Proteksi Superadmin & Manajemen Kredensial**:
+  `apps.accounts.services.delete_user` melindungi akun seed `admin@ops.local` dan menolak penghapusan jika jumlah superadmin aktif <= 1. `apps.accounts.services.update_user` memfasilitasi penggantian email dan password dengan validasi keamanan.
+- **Katalog Guard & RBAC UX Hardening**:
+  `ModuleAdmin`, `FeatureAdmin`, dan `ActionAdmin` menonaktifkan izin tambah dan hapus (`has_add_permission=False`, `has_delete_permission=False`). Katalog sepenuhnya di-generate dari modul via `sync_catalog`. `GroupAdmin` dilengkapi onboarding guidance banner dan ringkasan grant/anggota. `FeatureGrantAdmin` menggunakan `dynamic_actions.js` untuk memfilter pilihan aksi secara dinamis sesuai fitur yang dipilih.
+- **2FA TOTP dengan Enkripsi Simetris Dinamis & Deteksi Tamper**:
+  Model `UserTwoFactor` menyimpan rahasia TOTP terenkripsi. Kunci Fernet diturunkan secara dinamis per-user via HKDF-SHA256 (`salt=user.pk.bytes`, `info=b"ops_views:2fa:" + email`). Jika terjadi modifikasi manual / injeksi langsung di database, dekripsi melempar `TamperDetectedError`, kode ditolak, status 2FA otomatis di-reset (`is_enabled=False`), dan event audit `two_factor_tampered_reset` dipublikasikan. Akses `/admin/` dilindungi `TwoFactorVerificationMiddleware`.
+
+**Konsekuensi.**
+- Tidak ada data yang hilang permanen melalui sistem operasional, memudahkan audit jejak dan pemulihan data.
+- Sistem kebal dari penguncian akibat penghapusan superadmin terakhir.
+- Kredensial 2FA tidak dapat dipindahkan antar-user di database atau disusupi tanpa kunci enkripsi utama dan verifikasi integritas kriptografis.
+- Operator non-teknis mendapatkan panduan jelas saat mengonfigurasi grup dan hak akses.
+
+**Cara membalik.**
+Jika soft-delete ingin dihapus, ubah `SoftDeleteManager` kembali ke `models.Manager` standar dan hapus kolom terkait lewat migrasi baru (R10). Fitur 2FA dapat dinonaktifkan dengan mencopot `TwoFactorVerificationMiddleware` dari `settings/base.py`.
+
+---
+
 <!--
 Template entri baru:
 
@@ -465,3 +498,4 @@ Template entri baru:
 **Konsekuensi.** Apa yang jadi lebih mudah, apa yang jadi lebih sulit.
 **Cara membalik.** Langkahnya, atau kenapa tidak bisa.
 -->
+

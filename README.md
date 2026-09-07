@@ -184,7 +184,7 @@ yang lain, persis seperti perilaku message broker. Saat pindah ke microservice,
 - **Dependency**: setiap module boleh bergantung pada `apps.common`.
   `apps.common` **tidak boleh** bergantung pada module manapun. Graf-nya asiklik.
 
-### Hak akses bertingkat (access control)
+### Hak akses bertingkat (access control) & Panduan Operasional
 
 `apps.access` mengatur siapa boleh melihat dan memakai menu/aksi mana, lewat
 katalog bertingkat **Module → Feature → Action** plus pohon organisasi
@@ -195,25 +195,59 @@ katalog bertingkat **Module → Feature → Action** plus pohon organisasi
   menjadi katalog `Module`/`Feature`/`Action` (idempotent, never-delete —
   kolom operator tidak disentuh). `sync_features` tetap tersedia sebagai
   alias deprecated.
-- Pohon organisasi `OrgUnit` (parent → child, anti-siklus) + membership
+- **Katalog Guard**: `Module`, `Feature`, dan `Action` tidak dapat dibuat atau
+  dihapus secara manual di dashboard admin (`has_add_permission=False`,
+  `has_delete_permission=False`). Katalog sepenuhnya digenerate dari kode untuk
+  mencegah ketidaksinkronan metadata sistem. Tombol aksi "Sync Catalog dari Modul"
+  tersedia di admin changelist.
+- **Pohon organisasi** `OrgUnit` (parent → child, anti-siklus) + membership
   `OrgUnitMembership`: posisi seseorang = posisinya di pohon. Grant bisa
   diberi ke **group**, **user**, atau **org unit** (constraint 3-arah di DB).
-- Evaluasi tunggal di `apps.access.selectors.user_can(user, action_slug)` —
+- **Evaluasi tunggal** di `apps.access.selectors.user_can(user, action_slug)` —
   fail-closed dengan matriks precedensi: action > feature, personal >
   org unit (termasuk leluhur) > group, `deny` > `allow`, superuser bypass,
   user non-aktif ditolak semua.
-- Enforcement nyata: admin tiap feature module meng-override `has_*_permission`
+- **Enforcement nyata**: admin tiap feature module meng-override `has_*_permission`
   memanggil `user_can`, jadi staff tanpa akses mendapat 403 — bukan sekadar
   menu disembunyikan. `apps.access.*` dan `auth.Group` superuser-only
   (menutup celah self-grant).
-  Lihat [ADR-016](docs/DECISIONS.md#adr-016--rbac-bertingkat-modulefeatureaction--pohon-organisasi)
-  (menggantikan sebagian [ADR-012](docs/DECISIONS.md#adr-012--hak-akses-menu-berbasis-group--grant-personal-appsaccess)).
 
-Status akun user kini eksplisit lewat `User.Status` (1 = aktif, 0 = nonaktif,
-2 = suspend). `is_active` diturunkan dari status tersebut (satu titik invariant
-di `User.save()`), dan hanya superuser yang boleh mengubah
-status/grup/permission/`is_staff`/`is_superuser`. Lihat
-[ADR-013](docs/DECISIONS.md#adr-013--status-akun-user-sebagai-enum-status).
+#### Panduan Konfigurasi RBAC untuk Pemula (Workflow Onboarding)
+
+Bagi operator non-teknis, alur pemberian hak akses dirancang intuitif:
+1. **Langkah 1: Tentukan Kelompok Kerja (Groups)**
+   Buka menu **Access → Groups**, buat grup sesuai peran (misal: *Staff Operasional*, *Supervisor Layanan*). Banner panduan di atas halaman menjelaskan alur langkah ini.
+2. **Langkah 2: Daftarkan User ke dalam Group**
+   Buka menu **Accounts → Users**, pilih user yang diinginkan, lalu masukkan ke grup yang relevan pada field *Groups*.
+3. **Langkah 3: Berikan Izin Akses (Feature Grants)**
+   Buka menu **Access → Feature grants** dan klik *Add Feature Grant*:
+   - Pilih **Grantee**: pilih salah satu dari Group, User, atau Org Unit.
+   - Pilih **Feature**: tentukan modul fitur yang ingin diakses (misal: `accounts.user`).
+   - Pilih **Action** *(Dinamis)*: sistem secara dinamis menyaring aksi yang sesuai dengan fitur yang dipilih (misal `accounts.user.create`, `accounts.user.edit`, atau opsi fallback `* Seluruh aksi dalam fitur ini`).
+   - Tentukan **Effect**: `ALLOW` untuk memberikan izin atau `DENY` untuk memblokir aksi tertentu.
+   - Tooltip dan bantuan penjelasan tersedia di setiap kolom untuk kemudahan pemahaman.
+
+#### Proteksi Superadmin & Manajemen Akun
+
+- **Proteksi Akun Seed**: Akun superadmin utama `admin@ops.local` diproteksi khusus dan tidak dapat dihapus.
+- **Anti-Lockout Superadmin**: Sistem melarang penghapusan superadmin jika jumlah superadmin aktif hanya tersisa 1. Penghapusan superadmin hanya diizinkan jika terdapat lebih dari 1 superadmin aktif di sistem.
+- **Edit Kredensial Langsung**: Halaman detail user admin menyediakan form inline untuk mengganti email dan password secara aman, tervalidasi, dan dieksekusi melalui service layer `apps.accounts.services.update_user` (mematuhi R5).
+- Status akun user eksplisit lewat `User.Status` (1 = aktif, 0 = nonaktif, 2 = suspend). `is_active` diturunkan dari status tersebut (satu titik invariant di `User.save()`).
+
+#### Autentikasi Dua Faktor (2FA Google Authenticator) & Dynamic Tamper Protection
+
+- Mendukung standar RFC 6238 TOTP yang kompatibel dengan Google Authenticator.
+- **Enkripsi Simetris Dinamis**: Kunci enkripsi diturunkan secara dinamis per user menggunakan **HKDF-SHA256** dari `DJANGO_TWO_FACTOR_ENCRYPTION_KEY` yang digabungkan dengan UUID dan email user (`apps/common/crypto.py`).
+- **Deteksi Tamper & Auto-Reset**: Jika ciphertext di tabel database diubah secara manual atau dipindahkan antar-user, sistem mendeteksi kegagalan otentikasi pesan (`TamperDetectedError`). OTP otomatis ditolak, record 2FA di-reset (`is_enabled=False`), dan event audit `two_factor_tampered_reset` dipublikasikan.
+- **Enforcement Admin**: Middleware `TwoFactorVerificationMiddleware` memastikan setiap user yang mengaktifkan 2FA wajib memverifikasi kode OTP sebelum dapat mengakses panel `/admin/`.
+
+#### Audit Trail & Soft-Delete (Tanpa Delete Permanen)
+
+- **Audit Trail Universal**: Semua model turunan `apps.common.models.BaseModel` secara otomatis mencatat `created_at`, `created_by_id`, `updated_at`, dan `updated_by_id`.
+- **Soft-Delete**: Tidak ada baris data yang dihapus permanen melalui sistem operasional. Penghapusan mengisi `is_deleted=True`, `deleted_at`, dan `deleted_by_id`.
+- Query normal secara default hanya membaca baris aktif (`is_deleted=False`). Developer dan kebutuhan audit dapat mengakses data lengkap melalui manager `.all_objects`.
+
+Lihat [ADR-016](docs/DECISIONS.md#adr-016--rbac-bertingkat-modulefeatureaction--pohon-organisasi) dan [ADR-017](docs/DECISIONS.md#adr-017--rbac-ux-hardening-soft-delete--audit-trail-catalog-guard-dan-dynamic-2fa-totp).
 
 ### Kenapa UUID sebagai primary key
 
@@ -313,6 +347,7 @@ asli di server). **Tidak ada satu pun secret di dalam kode.**
 |---|---|---|
 | `DJANGO_SETTINGS_MODULE` | `config.settings.local` | `config.settings.production` di server |
 | `DJANGO_SECRET_KEY` | — **wajib** | Tanpa ini proses menolak start |
+| `DJANGO_TWO_FACTOR_ENCRYPTION_KEY` | contoh 32-byte key di base | Master key enkripsi simetris rahasia 2FA TOTP (base64 URL-safe) |
 | `DJANGO_DEBUG` | `False` di base, `True` di local | Wajib `False` di production |
 | `DJANGO_ALLOWED_HOSTS` | — wajib di production | Dipisah koma |
 | `DJANGO_ADMIN_URL` | `admin/` | Ubah di production untuk mengurangi bot login |
@@ -756,6 +791,8 @@ tidak ada tabel yang perlu dipecah paksa.
 | `psycopg[binary]` | `==3.3.5` | Driver PostgreSQL. `[binary]` = tanpa compile |
 | `asgiref`, `sqlparse` | ter-pin | Dependency turunan Django, di-pin agar build reprodusibel |
 | `gunicorn` | `==23.0.0` | Production saja |
+| `cryptography` | `==44.0.2` | Enkripsi simetris rahasia 2FA TOTP (Fernet + HKDF) |
+| `pyotp` | `==2.9.0` | Standard RFC 6238 TOTP untuk Google Authenticator |
 
 ### Struktur file
 

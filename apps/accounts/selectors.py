@@ -52,3 +52,22 @@ def get_user_permissions(user: User) -> set[str]:
             )
         }
     return set(user.get_all_permissions())
+
+
+def count_active_superadmins() -> int:
+    """Return count of active superuser accounts."""
+    return User.objects.filter(is_superuser=True, is_active=True).count()
+
+
+def is_two_factor_enabled(user: User) -> bool:
+    """Check if 2FA (TOTP) is active for the given user."""
+    from .models import UserTwoFactor
+
+    return UserTwoFactor.objects.filter(user_id=user.pk, is_enabled=True).exists()
+
+
+def get_user_two_factor(user: User):
+    """Retrieve 2FA record for the given user if one exists."""
+    from .models import UserTwoFactor
+
+    return UserTwoFactor.objects.filter(user_id=user.pk).first()
