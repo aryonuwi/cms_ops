@@ -1,6 +1,7 @@
 """Public entry point and operational endpoints that belong to no feature."""
 
 from django.conf import settings
+from django.core.cache import caches
 from django.db import connections
 from django.db.utils import OperationalError
 from django.http import HttpRequest, HttpResponse, JsonResponse
@@ -27,7 +28,12 @@ def liveness(request: HttpRequest) -> JsonResponse:
 
 @never_cache
 def readiness(request: HttpRequest) -> JsonResponse:
-    """Can the process serve traffic? Checks every configured database."""
+    """Can the process serve traffic? Checks every configured database.
+
+    Cache is checked too, but never flips `healthy` - it's an optional
+    optimisation layer (falls back to locmem when `REDIS_URL` is unset, see
+    ADR-015), not something traffic depends on to be served correctly.
+    """
     checks: dict[str, str] = {}
     healthy = True
 
@@ -40,6 +46,14 @@ def readiness(request: HttpRequest) -> JsonResponse:
         except OperationalError as exc:
             healthy = False
             checks[f"database:{alias}"] = f"error: {exc.__class__.__name__}"
+
+    for alias in caches:
+        try:
+            caches[alias].set("healthcheck", "ok", timeout=5)
+            caches[alias].get("healthcheck")
+            checks[f"cache:{alias}"] = "ok"
+        except Exception as exc:  # noqa: BLE001 - a health probe must never itself 500
+            checks[f"cache:{alias}"] = f"error: {exc.__class__.__name__}"
 
     return JsonResponse(
         {"status": "ok" if healthy else "degraded", "checks": checks},

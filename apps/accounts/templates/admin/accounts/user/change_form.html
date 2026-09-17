@@ -1,0 +1,14 @@
+{% extends "admin/change_form.html" %}
+{% load i18n unfold %}
+
+{% block object-tools-items %}
+    {{ block.super }}
+    {% if two_factor_reset_url %}
+        {% trans "Reset 2FA" as title %}
+        {% include "unfold/helpers/tab_action.html" with title=title link=two_factor_reset_url icon="restart_alt" %}
+    {% endif %}
+    {% if password_reset_url %}
+        {% trans "Kirim Link Reset Password" as title %}
+        {% include "unfold/helpers/tab_action.html" with title=title link=password_reset_url icon="mail" %}
+    {% endif %}
+{% endblock %}

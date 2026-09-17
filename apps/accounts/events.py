@@ -11,6 +11,11 @@ GROUP_ASSIGNED = "accounts.group_assigned"
 GROUP_UNASSIGNED = "accounts.group_unassigned"
 PERMISSION_GRANTED = "accounts.permission_granted"
 PERMISSION_REVOKED = "accounts.permission_revoked"
+USER_DELETED = "accounts.user_deleted"
+TWO_FACTOR_SETUP_INITIATED = "accounts.two_factor_setup_initiated"
+TWO_FACTOR_ENABLED = "accounts.two_factor_enabled"
+TWO_FACTOR_DISABLED = "accounts.two_factor_disabled"
+TWO_FACTOR_TAMPERED_RESET = "accounts.two_factor_tampered_reset"
 
 
 def user_registered(*, user_id: str, email: str) -> DomainEvent:
@@ -66,4 +71,39 @@ def permission_revoked(*, user_id: str, permission_codename: str) -> DomainEvent
             "user_id": str(user_id),
             "permission_codename": permission_codename,
         },
+    )
+
+
+def user_deleted(*, user_id: str, email: str) -> DomainEvent:
+    return DomainEvent(
+        name=USER_DELETED,
+        payload={"user_id": str(user_id), "email": email},
+    )
+
+
+def two_factor_setup_initiated(*, user_id: str) -> DomainEvent:
+    return DomainEvent(
+        name=TWO_FACTOR_SETUP_INITIATED,
+        payload={"user_id": str(user_id)},
+    )
+
+
+def two_factor_enabled(*, user_id: str) -> DomainEvent:
+    return DomainEvent(
+        name=TWO_FACTOR_ENABLED,
+        payload={"user_id": str(user_id)},
+    )
+
+
+def two_factor_disabled(*, user_id: str) -> DomainEvent:
+    return DomainEvent(
+        name=TWO_FACTOR_DISABLED,
+        payload={"user_id": str(user_id)},
+    )
+
+
+def two_factor_tampered_reset(*, user_id: str) -> DomainEvent:
+    return DomainEvent(
+        name=TWO_FACTOR_TAMPERED_RESET,
+        payload={"user_id": str(user_id)},
     )

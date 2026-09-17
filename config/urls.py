@@ -15,7 +15,7 @@ urlpatterns = [
     # Landing page + operational probes - no feature module owns these.
     path("", include("apps.common.urls")),
     # Feature modules
-    # path("api/accounts/", include("apps.accounts.urls")),
+    path("accounts/", include("apps.accounts.urls")),
 ]
 
 if settings.DEBUG:

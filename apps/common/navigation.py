@@ -69,6 +69,41 @@ def iter_navigation_groups() -> Iterator[tuple[str, dict[str, Any]]]:
             yield app_config.name, group
 
 
+def iter_modules() -> Iterator[tuple[str, str, str]]:
+    """Yield ``(slug, package, label)`` for every installed ``apps.*`` module.
+
+    ``slug`` is the short app label (``AppConfig.label``), ``package`` the
+    dotted import path and ``label`` the human-readable verbose name. Used by
+    the access catalog sync so a module is recorded the moment it is installed.
+    """
+    for app_config in apps.get_app_configs():
+        if not app_config.name.startswith("apps."):
+            continue
+        yield app_config.label, app_config.name, app_config.verbose_name
+
+
+def iter_actions() -> Iterator[tuple[str, dict[str, Any]]]:
+    """Yield ``(app_label, action)`` for every action a module declares.
+
+    Mirrors ``iter_navigation_groups``: a module exposes an ``ACTIONS`` list in
+    its own ``actions.py`` (referencing feature slugs declared in its
+    ``navigation.py``). A module whose actions cannot be imported is logged and
+    skipped, so one broken declaration cannot fail the whole catalog sync.
+    """
+    for app_config in apps.get_app_configs():
+        if not app_config.name.startswith("apps."):
+            continue
+        try:
+            module = import_module(f"{app_config.name}.actions")
+        except ModuleNotFoundError:
+            continue
+        except Exception:  # noqa: BLE001
+            logger.exception("actions.import_failed", extra={"app": app_config.name})
+            continue
+        for action in getattr(module, "ACTIONS", []):
+            yield app_config.label, action
+
+
 def build_sidebar_navigation(request: HttpRequest | None = None) -> list[dict[str, Any]]:
     """Collect and order every module's navigation groups.
 

@@ -6,14 +6,22 @@ publication stay in one place - never in a view, admin or another module.
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Iterator
+from dataclasses import asdict, dataclass, replace
+from importlib import import_module
+from typing import Any
+
 from django.contrib.auth.models import Group
 from django.db import transaction
 
 from apps.common.events import publish
-from apps.common.navigation import iter_navigation_groups
+from apps.common.navigation import iter_actions, iter_modules, iter_navigation_groups
 
 from . import events
-from .models import Feature, FeatureGrant
+from .models import Action, Feature, FeatureGrant, Module, OrgUnit, OrgUnitMembership
+
+logger = logging.getLogger(__name__)
 
 
 @transaction.atomic
@@ -47,41 +55,68 @@ def grant_feature(
     grantee_type: str,
     group: Group | None = None,
     user_id: str | None = None,
+    org_unit: OrgUnit | None = None,
+    action: Action | None = None,
     effect: str = FeatureGrant.Effect.ALLOW,
 ) -> FeatureGrant:
-    """Create - or update - the single grant for this feature + grantee.
+    """Create - or update - the single grant for this feature (or action) + grantee.
 
     Re-submitting the same decision must not produce a duplicate row (the
     unique constraints forbid it anyway), so an upsert keeps the admin and
-    future API callers forgiving.
+    future API callers forgiving. ``action=None`` grants the whole feature;
+    setting it narrows the decision to that one action.
     """
+    if action is not None and action.feature_id != feature.pk:
+        raise ValueError("The action must belong to the granted feature.")
+
+    common_defaults = {
+        "effect": effect,
+        "is_deleted": False,
+        "deleted_at": None,
+        "deleted_by_id": None,
+    }
+
     if grantee_type == FeatureGrant.GranteeType.GROUP:
         if group is None:
             raise ValueError("A group grant requires a group.")
-        grant, _created = FeatureGrant.objects.update_or_create(
+        grant, _created = FeatureGrant.all_objects.update_or_create(
             feature=feature,
+            action=action,
             grantee_type=grantee_type,
             group=group,
-            defaults={"effect": effect, "user_id": None},
+            defaults={**common_defaults, "user_id": None, "org_unit": None},
         )
         grantee_id = str(group.pk)
     elif grantee_type == FeatureGrant.GranteeType.USER:
         if user_id is None:
             raise ValueError("A personal grant requires a user_id.")
-        grant, _created = FeatureGrant.objects.update_or_create(
+        grant, _created = FeatureGrant.all_objects.update_or_create(
             feature=feature,
+            action=action,
             grantee_type=grantee_type,
             user_id=user_id,
-            defaults={"effect": effect, "group": None},
+            defaults={**common_defaults, "group": None, "org_unit": None},
         )
         grantee_id = str(user_id)
+    elif grantee_type == FeatureGrant.GranteeType.ORG_UNIT:
+        if org_unit is None:
+            raise ValueError("An org-unit grant requires an org_unit.")
+        grant, _created = FeatureGrant.all_objects.update_or_create(
+            feature=feature,
+            action=action,
+            grantee_type=grantee_type,
+            org_unit=org_unit,
+            defaults={**common_defaults, "group": None, "user_id": None},
+        )
+        grantee_id = str(org_unit.pk)
     else:
         raise ValueError(f"Unknown grantee_type: {grantee_type!r}")
 
     transaction.on_commit(
         lambda: publish(
-            events.feature_granted(
-                feature_slug=feature.slug,
+            _granted_event(
+                feature=feature,
+                action=action,
                 grantee_type=grantee_type,
                 grantee_id=grantee_id,
                 effect=effect,
@@ -94,10 +129,15 @@ def grant_feature(
 @transaction.atomic
 def revoke_feature(*, grant: FeatureGrant) -> None:
     """Remove one access decision and announce the previous state."""
-    grantee_id = (
-        str(grant.group.pk) if grant.group is not None else str(grant.user_id)
-    )
+    if grant.grantee_type == FeatureGrant.GranteeType.GROUP:
+        grantee_id = str(grant.group.pk)
+    elif grant.grantee_type == FeatureGrant.GranteeType.ORG_UNIT:
+        grantee_id = str(grant.org_unit.pk)
+    else:
+        grantee_id = str(grant.user_id)
+
     feature_slug = grant.feature.slug
+    action_slug = grant.action.slug if grant.action is not None else None
     grantee_type = grant.grantee_type
     effect = grant.effect
 
@@ -105,8 +145,9 @@ def revoke_feature(*, grant: FeatureGrant) -> None:
 
     transaction.on_commit(
         lambda: publish(
-            events.feature_revoked(
+            _revoked_event(
                 feature_slug=feature_slug,
+                action_slug=action_slug,
                 grantee_type=grantee_type,
                 grantee_id=grantee_id,
                 effect=effect,
@@ -116,19 +157,234 @@ def revoke_feature(*, grant: FeatureGrant) -> None:
 
 
 @transaction.atomic
-def sync_features() -> tuple[int, int]:
-    """Refresh the Feature catalog from navigation declarations.
+def grant_module(
+    *,
+    module_slug: str,
+    grantee_type: str,
+    group: Group | None = None,
+    user_id: str | None = None,
+    org_unit: OrgUnit | None = None,
+    effect: str = FeatureGrant.Effect.ALLOW,
+) -> int:
+    """Grant a whole module by fanning out to each of its features.
 
-    Code stays the source of truth for which features exist (ADR-007): this
-    only records what modules declare so grants have stable rows to point at.
-    Operator-managed columns (description, required_permission, is_active)
-    are deliberately left untouched, and features that disappear from code
-    are kept - deactivating them is an operator decision, not a sync side
-    effect, because grants may still reference them.
+    A module-level decision is a convenience, not a new grant type: it writes
+    one feature-scoped grant per feature under the module, so ``user_can``
+    never has to resolve modules separately.
     """
-    created = updated = 0
+    features = list(Feature.objects.filter(module=module_slug))
+    for feature in features:
+        grant_feature(
+            feature=feature,
+            grantee_type=grantee_type,
+            group=group,
+            user_id=user_id,
+            org_unit=org_unit,
+            effect=effect,
+        )
+    return len(features)
 
-    for app_name, group in iter_navigation_groups():
+
+def _granted_event(
+    *,
+    feature: Feature,
+    action: Action | None,
+    grantee_type: str,
+    grantee_id: str,
+    effect: str,
+):
+    if action is None:
+        return events.feature_granted(
+            feature_slug=feature.slug,
+            grantee_type=grantee_type,
+            grantee_id=grantee_id,
+            effect=effect,
+        )
+    return events.action_granted(
+        feature_slug=feature.slug,
+        action_slug=action.slug,
+        grantee_type=grantee_type,
+        grantee_id=grantee_id,
+        effect=effect,
+    )
+
+
+def _revoked_event(
+    *,
+    feature_slug: str,
+    action_slug: str | None,
+    grantee_type: str,
+    grantee_id: str,
+    effect: str,
+):
+    if action_slug is None:
+        return events.feature_revoked(
+            feature_slug=feature_slug,
+            grantee_type=grantee_type,
+            grantee_id=grantee_id,
+            effect=effect,
+        )
+    return events.action_revoked(
+        feature_slug=feature_slug,
+        action_slug=action_slug,
+        grantee_type=grantee_type,
+        grantee_id=grantee_id,
+        effect=effect,
+    )
+
+
+@dataclass(frozen=True)
+class SyncResult:
+    """What one ``sync_catalog`` run created or updated."""
+
+    modules_created: int = 0
+    modules_updated: int = 0
+    features_created: int = 0
+    features_updated: int = 0
+    actions_created: int = 0
+    actions_updated: int = 0
+
+
+@transaction.atomic
+def create_module(
+    *,
+    slug: str,
+    label: str,
+    package: str = "",
+    registration_mode: str = Module.RegistrationMode.MANUAL,
+    description: str = "",
+    is_active: bool = True,
+    order: int = 0,
+) -> Module:
+    """Register a module from the dashboard or another trusted write caller."""
+    _validate_manual_package(package)
+    return Module.objects.create(
+        slug=slug,
+        label=label,
+        package=package,
+        registration_mode=registration_mode,
+        description=description,
+        is_active=is_active,
+        order=order,
+    )
+
+
+@transaction.atomic
+def update_module(
+    *,
+    module: Module,
+    slug: str,
+    label: str,
+    package: str = "",
+    description: str = "",
+    is_active: bool = True,
+    order: int = 0,
+) -> Module:
+    """Update a manually registered module through the write API."""
+    if module.registration_mode != Module.RegistrationMode.MANUAL:
+        raise ValueError("Automatically scanned modules cannot change their identity.")
+    _validate_manual_package(package)
+    module.slug = slug
+    module.label = label
+    module.package = package
+    module.description = description
+    module.is_active = is_active
+    module.order = order
+    module.save(
+        update_fields=[
+            "slug",
+            "label",
+            "package",
+            "description",
+            "is_active",
+            "order",
+            "updated_at",
+        ]
+    )
+    return module
+
+
+@transaction.atomic
+def update_module_settings(
+    *,
+    module: Module,
+    description: str = "",
+    is_active: bool = True,
+    order: int = 0,
+) -> Module:
+    """Update operator-owned settings without changing scanner-owned metadata."""
+    module.description = description
+    module.is_active = is_active
+    module.order = order
+    module.save(update_fields=["description", "is_active", "order", "updated_at"])
+    return module
+
+
+def _validate_manual_package(package: str) -> None:
+    """Keep dashboard imports inside the local ``apps`` namespace."""
+    if package and not package.startswith("apps."):
+        raise ValueError("A manual module package must start with 'apps.'.")
+
+
+@transaction.atomic
+def create_action(
+    *,
+    feature: Feature,
+    code: str,
+    label: str,
+    category: str = Action.Category.CUSTOM,
+    required_permission: str = "",
+    order: int = 0,
+) -> Action:
+    """Register an action by hand; declarable actions belong in ``actions.py``."""
+    return Action.objects.create(
+        feature=feature,
+        slug=f"{feature.slug}.{code}",
+        code=code,
+        label=label,
+        category=category,
+        required_permission=required_permission,
+        order=order,
+    )
+
+
+@transaction.atomic
+def sync_catalog() -> SyncResult:
+    """Refresh the Module → Feature → Action catalog from code declarations.
+
+    Code stays the source of truth for automatic modules (ADR-007); manually
+    registered packages may also provide ``navigation.py`` and ``actions.py``.
+    Every level is an idempotent upsert and nothing is ever deleted - entries
+    that disappear from code are kept, because deactivating them is an operator
+    decision and grants may still reference them. Operator-managed columns
+    (description, required_permission, is_active, order) are deliberately left
+    untouched.
+    """
+    result = SyncResult()
+
+    # Modules first, so Feature.module can point at their slug.
+    for slug, package, label in iter_modules():
+        _module, was_created = Module.objects.update_or_create(
+            slug=slug,
+            defaults={
+                "label": label,
+                "package": package,
+                "registration_mode": Module.RegistrationMode.AUTOMATIC,
+            },
+        )
+        if was_created:
+            result = replace(result, modules_created=result.modules_created + 1)
+        else:
+            result = replace(result, modules_updated=result.modules_updated + 1)
+
+    navigation_groups = list(iter_navigation_groups())
+    navigation_groups.extend(_iter_manual_navigation_groups())
+    for module_name, group in navigation_groups:
+        module_slug = (
+            module_name.rsplit(".", 1)[-1]
+            if module_name.startswith("apps.")
+            else module_name
+        )
         for item in group.get("items", []):
             slug = item.get("feature")
             if not slug:
@@ -137,15 +393,181 @@ def sync_features() -> tuple[int, int]:
                 slug=slug,
                 defaults={
                     "label": str(item.get("title", slug)),
-                    "module": app_name,
+                    "module": module_slug,
                 },
             )
             if was_created:
-                created += 1
+                result = replace(result, features_created=result.features_created + 1)
             else:
-                updated += 1
+                result = replace(result, features_updated=result.features_updated + 1)
 
+    action_declarations = list(iter_actions())
+    action_declarations.extend(_iter_manual_actions())
+    for app_label, declaration in action_declarations:
+        feature_slug = declaration.get("feature")
+        code = declaration.get("code")
+        if not feature_slug or not code:
+            continue
+        feature = Feature.objects.filter(slug=feature_slug).first()
+        if feature is None:
+            # An action declared for a feature absent from navigation.py: record
+            # the feature too, so the action has a home and grants can point at it.
+            feature = Feature.objects.create(
+                slug=feature_slug,
+                label=str(feature_slug),
+                module=app_label,
+            )
+        action_slug = f"{feature_slug}.{code}"
+        _action, was_created = Action.objects.update_or_create(
+            slug=action_slug,
+            defaults={
+                "feature": feature,
+                "code": code,
+                "label": str(declaration.get("label", code)),
+                "category": declaration.get("category", Action.Category.CUSTOM),
+                "required_permission": declaration.get("required_permission", ""),
+            },
+        )
+        if was_created:
+            result = replace(result, actions_created=result.actions_created + 1)
+        else:
+            result = replace(result, actions_updated=result.actions_updated + 1)
+
+    transaction.on_commit(lambda: publish(events.catalog_synced(**asdict(result))))
+    return result
+
+
+def _iter_manual_navigation_groups() -> Iterator[tuple[str, dict[str, Any]]]:
+    """Read declarations from manual modules that are not Django-installed."""
+    installed_packages = {package for _slug, package, _label in iter_modules()}
+    for module in Module.objects.filter(
+        registration_mode=Module.RegistrationMode.MANUAL,
+    ).exclude(package=""):
+        if module.package in installed_packages:
+            continue
+        try:
+            navigation = import_module(f"{module.package}.navigation")
+        except ModuleNotFoundError:
+            continue
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "manual_module.navigation_import_failed",
+                extra={"module": module.slug},
+            )
+            continue
+        for group in getattr(navigation, "NAVIGATION", []):
+            yield module.slug, group
+
+
+def _iter_manual_actions() -> Iterator[tuple[str, dict[str, Any]]]:
+    """Read action declarations from manual modules outside the app registry."""
+    installed_packages = {package for _slug, package, _label in iter_modules()}
+    for module in Module.objects.filter(
+        registration_mode=Module.RegistrationMode.MANUAL,
+    ).exclude(package=""):
+        if module.package in installed_packages:
+            continue
+        try:
+            actions = import_module(f"{module.package}.actions")
+        except ModuleNotFoundError:
+            continue
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "manual_module.actions_import_failed",
+                extra={"module": module.slug},
+            )
+            continue
+        for action in getattr(actions, "ACTIONS", []):
+            yield module.slug, action
+
+
+def _would_cycle(org_unit: OrgUnit, new_parent: OrgUnit) -> bool:
+    """True if ``new_parent`` is ``org_unit`` or one of its descendants."""
+    node = new_parent
+    while node is not None:
+        if node.pk == org_unit.pk:
+            return True
+        node = node.parent
+    return False
+
+
+@transaction.atomic
+def create_org_unit(
+    *, name: str, slug: str, parent: OrgUnit | None = None, order: int = 0
+) -> OrgUnit:
+    """Create a node in the organisation tree."""
+    org_unit = OrgUnit.objects.create(name=name, slug=slug, parent=parent, order=order)
     transaction.on_commit(
-        lambda: publish(events.features_synced(created=created, updated=updated))
+        lambda: publish(
+            events.org_unit_created(
+                org_unit_slug=org_unit.slug,
+                parent_slug=org_unit.parent.slug if org_unit.parent is not None else None,
+            )
+        )
     )
-    return created, updated
+    return org_unit
+
+
+@transaction.atomic
+def move_org_unit(
+    *, org_unit: OrgUnit, new_parent: OrgUnit | None = None
+) -> OrgUnit:
+    """Re-parent a node, refusing to create a cycle."""
+    if new_parent is not None and _would_cycle(org_unit, new_parent):
+        raise ValueError("Cannot move an org unit under its own descendant.")
+    org_unit.parent = new_parent
+    org_unit.save(update_fields=["parent", "updated_at"])
+    transaction.on_commit(
+        lambda: publish(
+            events.org_unit_moved(
+                org_unit_slug=org_unit.slug,
+                parent_slug=new_parent.slug if new_parent is not None else None,
+            )
+        )
+    )
+    return org_unit
+
+
+@transaction.atomic
+def add_org_member(*, org_unit: OrgUnit, user_id: str) -> OrgUnitMembership:
+    """Add a user to an org unit once, announcing only a real change."""
+    membership = OrgUnitMembership.all_objects.filter(
+        org_unit=org_unit, user_id=user_id
+    ).first()
+    if membership is None:
+        membership = OrgUnitMembership.objects.create(
+            org_unit=org_unit, user_id=user_id
+        )
+        created = True
+    else:
+        created = membership.is_deleted
+        if membership.is_deleted:
+            membership.is_deleted = False
+            membership.deleted_at = None
+            membership.deleted_by_id = None
+            membership.save(update_fields=["is_deleted", "deleted_at", "deleted_by_id", "updated_at"])
+
+    if created:
+        transaction.on_commit(
+            lambda: publish(
+                events.org_unit_member_added(
+                    org_unit_slug=org_unit.slug, user_id=str(user_id)
+                )
+            )
+        )
+    return membership
+
+
+@transaction.atomic
+def remove_org_member(*, membership: OrgUnitMembership) -> None:
+    """Remove one membership and announce the previous state."""
+    org_unit_slug = membership.org_unit.slug
+    user_id = str(membership.user_id)
+    membership.delete()
+    transaction.on_commit(
+        lambda: publish(
+            events.org_unit_member_removed(
+                org_unit_slug=org_unit_slug, user_id=user_id
+            )
+        )
+    )

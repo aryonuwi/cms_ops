@@ -1,6 +1,6 @@
 /* Landing page Flexagift ERP - hero, strip, footer.
    Isometrik + animasi murni CSS/JS tanpa library: satu adegan tidak sebanding
-   dengan menambah dependency (AGENTS.md §4). Setiap gerak punya pasangan
+   dengan menambah dependency (aturan arsitektur di Obsidian). Setiap gerak punya pasangan
    `prefers-reduced-motion` di bagian paling bawah file. */
 
 :root {

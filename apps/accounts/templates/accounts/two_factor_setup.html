@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Setup 2FA — Google Authenticator | CMS Ops</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+    </style>
+</head>
+<body class="bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-100 min-h-screen flex items-center justify-center p-4">
+    <div class="max-w-lg w-full bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 p-8">
+        <div class="text-center mb-6">
+            <div class="w-16 h-16 bg-green-100 dark:bg-green-900/40 text-green-600 dark:text-green-400 rounded-2xl flex items-center justify-center mx-auto mb-4 text-3xl shadow-inner">
+                📲
+            </div>
+            <h1 class="text-2xl font-bold tracking-tight">Aktifkan Google Authenticator</h1>
+            <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                Tingkatkan keamanan akun <strong class="text-slate-700 dark:text-slate-200 font-medium">{{ email }}</strong> dengan 2FA.
+            </p>
+        </div>
+
+        <div class="space-y-4 mb-6 text-sm">
+            <div class="p-4 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 text-blue-800 dark:text-blue-300">
+                <p class="font-semibold mb-1">Langkah 1: Tambahkan Akun ke Google Authenticator</p>
+                <p class="text-xs">Buka aplikasi <strong>Google Authenticator</strong> di HP Anda, pilih <strong>(+) Tambahkan Akun</strong> &gt; <strong>Masukkan Kunci Penyiapan (Enter Setup Key)</strong>.</p>
+            </div>
+
+            <div class="p-4 rounded-xl bg-slate-100 dark:bg-slate-900/70 border border-slate-200 dark:border-slate-700 text-center">
+                <span class="text-xs text-slate-500 dark:text-slate-400 block mb-1">KUNCI RAHASIA (SECRET KEY):</span>
+                <span class="font-mono text-lg font-bold tracking-wider text-blue-600 dark:text-blue-400 select-all">{{ secret }}</span>
+                <p class="text-[11px] text-slate-400 mt-1">Tipe Kunci: Time-based (berdasarkan waktu)</p>
+            </div>
+        </div>
+
+        {% if form.errors %}
+            <div class="mb-5 p-4 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 text-red-700 dark:text-red-300 text-sm">
+                {% for field in form %}
+                    {% for error in field.errors %}
+                        <p class="font-medium">⚠️ {{ error }}</p>
+                    {% endfor %}
+                {% endfor %}
+            </div>
+        {% endif %}
+
+        <form method="post" class="space-y-5">
+            {% csrf_token %}
+            <div>
+                <label for="id_code" class="block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2 text-center">
+                    Langkah 2: Masukkan 6 Digit Kode untuk Mengaktifkan
+                </label>
+                <input type="text" name="code" id="id_code" required maxlength="6" pattern="[0-9]*" inputmode="numeric" autofocus
+                       class="w-full text-center text-3xl font-bold font-mono tracking-widest py-3 px-4 rounded-xl border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 focus:ring-4 focus:ring-green-500/20 focus:border-green-500 dark:focus:border-green-400 transition outline-none"
+                       placeholder="000000" autocomplete="one-time-code">
+            </div>
+
+            <button type="submit" class="w-full py-3 px-4 bg-green-600 hover:bg-green-700 active:bg-green-800 text-white font-semibold rounded-xl shadow-lg shadow-green-500/25 transition duration-150 flex items-center justify-center space-x-2">
+                <span>Konfirmasi & Aktifkan 2FA</span>
+                <span>✓</span>
+            </button>
+        </form>
+
+        <div class="mt-6 pt-4 border-t border-slate-100 dark:border-slate-700 text-center">
+            <a href="/admin/" class="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition">
+                ← Batalkan & Kembali ke Dashboard
+            </a>
+        </div>
+    </div>
+</body>
+</html>
