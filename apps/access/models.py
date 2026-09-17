@@ -15,15 +15,25 @@ from apps.common.models import BaseModel
 class Module(BaseModel):
     """An installed feature module (a Django app under ``apps.*``).
 
-    The top level of the access catalog. Seeded by ``services.sync_catalog``
-    from the app registry, so adding a module records it here without editing a
-    central list (ADR-007). Operators may deactivate a module they do not want
-    surfaced; sync never deletes a module that disappeared from code.
+    The top level of the access catalog. It can be registered manually from the
+    dashboard or seeded by ``services.sync_catalog`` from the app registry.
+    Operators may deactivate a module they do not want surfaced; sync never
+    deletes a module that disappeared from code.
     """
+
+    class RegistrationMode(models.TextChoices):
+        MANUAL = "manual", _("Manual dashboard")
+        AUTOMATIC = "automatic", _("Automatic scan")
 
     slug = models.SlugField(_("slug"), max_length=100, unique=True)
     label = models.CharField(_("label"), max_length=150)
     package = models.CharField(_("package"), max_length=200, blank=True)
+    registration_mode = models.CharField(
+        _("registration mode"),
+        max_length=20,
+        choices=RegistrationMode.choices,
+        default=RegistrationMode.MANUAL,
+    )
     description = models.TextField(_("description"), blank=True)
     is_active = models.BooleanField(_("is active"), default=True)
     order = models.IntegerField(_("order"), default=0)

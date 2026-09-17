@@ -148,6 +148,38 @@ body:not(.login) header {
   border-bottom: 1px solid var(--fx-line);
 }
 
+/* ---------- formulir detail yang ringkas ----------------------------------
+ * Unfold menyediakan tab fieldset; aturan ini mengecilkan ruang kosong di
+ * panel aktif tanpa mengubah formulir add atau halaman admin lainnya. */
+
+body.change-form #content-main > form > .flex.flex-col.gap-6 {
+  gap: .75rem;
+}
+
+body.change-form #content-main .tab-wrapper {
+  margin-top: .25rem;
+}
+
+body.change-form #content-main .tab-wrapper > .module {
+  margin: 0;
+  padding-bottom: .25rem;
+}
+
+body.change-form #content-main .tab-wrapper .form-row {
+  min-height: 0;
+}
+
+body.change-form #content-main .tab-wrapper .field-line {
+  gap: .5rem;
+  min-height: 0;
+  padding-top: .45rem;
+  padding-bottom: .45rem;
+}
+
+body.change-form #content-main .tab-wrapper .help {
+  margin-top: .25rem;
+}
+
 @media (prefers-reduced-motion: reduce) {
   body.login .w-full.sm\:w-96 { animation: none; }
   body.login #login-form .submit-row { transition: none; }

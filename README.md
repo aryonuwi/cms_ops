@@ -3,7 +3,8 @@
 > Alias publik project ini: **`cms_ops`** — dipakai untuk judul admin
 > (`DJANGO_SITE_TITLE`) dan komunikasi. Identifier internal **tidak berubah**:
 > repo `ops_views`, package `config`, database `ops_views`
-> (lihat [ADR-014](docs/DECISIONS.md#adr-014--alias-publik-cms_ops-identifier-internal-tidak-berubah)).
+> (lihat ADR-014 di catatan Obsidian
+> `$OBSIDIAN_VAULT/ops_views/Decisions/Repository-ADRs.md`).
 
 Django 6.1 operations panel with a [Unfold](https://unfoldadmin.com/) admin, split
 settings per environment, and a **modular-per-feature** layout designed so any
@@ -34,23 +35,24 @@ feature can later be lifted out into its own service.
 Project ini punya beberapa keputusan yang **tidak boleh dibalik tanpa sengaja** —
 PostgreSQL tanpa fallback, batas antar-module, settings fail-closed. Supaya
 keputusan itu bertahan melewati pergantian sesi, developer, agent, atau model AI,
-aturannya disimpan di repo, bukan di ingatan siapa pun:
+aturannya dicatat di Obsidian vault, bukan di ingatan siapa pun:
 
 | File | Isi |
 |---|---|
-| [`AGENTS.md`](AGENTS.md) | Aturan kerja + 10 larangan + Definition of Done. Dimuat otomatis oleh OpenCode |
-| [`docs/DECISIONS.md`](docs/DECISIONS.md) | **Kenapa** tiap keputusan diambil (ADR) |
+| `$OBSIDIAN_VAULT/ops_views/Agent/AGENTS.md` | Aturan kerja + 10 larangan + Definition of Done |
+| `$OBSIDIAN_VAULT/ops_views/Decisions/` | **Kenapa** tiap keputusan diambil (ADR) |
 
-**Kalau kamu agent AI yang baru masuk ke repo ini: baca `AGENTS.md` dulu, sampai
-habis, sebelum menulis kode.** Lalu sebelum melapor selesai, jalankan gate-nya:
+**Kalau kamu agent AI yang baru masuk ke repo ini: baca Agent HQ bootstrap lalu
+note `ops_views/Agent/AGENTS.md` di Obsidian sampai habis sebelum menulis kode.**
+Lalu sebelum melapor selesai, jalankan gate-nya:
 
 ```bash
 make verify
 ```
 
 Kalau kamu mengambil keputusan arsitektur baru, tulis satu entri ADR di
-`docs/DECISIONS.md`. Keputusan yang tidak tertulis akan dibalik oleh agent
-berikutnya.
+`$OBSIDIAN_VAULT/ops_views/Decisions/`. Keputusan yang tidak tertulis akan
+dibalik oleh agent berikutnya.
 
 ---
 
@@ -75,14 +77,11 @@ berikutnya.
 ops_views/                    # repo root - semua perintah dijalankan dari sini
 ├── manage.py
 ├── Makefile                  # make db-status / migrate / test / verify
-├── AGENTS.md                 # aturan kerja untuk AI agent  <-- baca ini
 ├── README.md
 ├── .env                      # rahasia lokal (gitignored)
 ├── .env.example              # template, aman di-commit
 ├── .gitignore
 ├── env/                      # virtualenv (gitignored)
-├── docs/
-│   └── DECISIONS.md          # ADR - kenapa tiap keputusan diambil
 ├── requirements.txt
 ├── requirements/
 │   ├── base.txt              # dependency semua environment
@@ -195,11 +194,12 @@ katalog bertingkat **Module → Feature → Action** plus pohon organisasi
   menjadi katalog `Module`/`Feature`/`Action` (idempotent, never-delete —
   kolom operator tidak disentuh). `sync_features` tetap tersedia sebagai
   alias deprecated.
-- **Katalog Guard**: `Module`, `Feature`, dan `Action` tidak dapat dibuat atau
-  dihapus secara manual di dashboard admin (`has_add_permission=False`,
-  `has_delete_permission=False`). Katalog sepenuhnya digenerate dari kode untuk
-  mencegah ketidaksinkronan metadata sistem. Tombol aksi "Sync Catalog dari Modul"
-  tersedia di admin changelist.
+- **Katalog Guard**: `Feature` dan `Action` tetap read-only dan digenerate dari
+  kode. `Module` memiliki dua jalur registrasi di dashboard: **Manual** untuk
+  modul yang didaftarkan operator, dan **Automatic scan** untuk app Django yang
+  terpasang. Tombol scan di admin changelist menjalankan sinkronisasi Module →
+  Feature → Action secara idempotent. Entry katalog tidak pernah dihapus oleh
+  scanner.
 - **Pohon organisasi** `OrgUnit` (parent → child, anti-siklus) + membership
   `OrgUnitMembership`: posisi seseorang = posisinya di pohon. Grant bisa
   diberi ke **group**, **user**, atau **org unit** (constraint 3-arah di DB).
@@ -232,6 +232,8 @@ Bagi operator non-teknis, alur pemberian hak akses dirancang intuitif:
 - **Proteksi Akun Seed**: Akun superadmin utama `admin@ops.local` diproteksi khusus dan tidak dapat dihapus.
 - **Anti-Lockout Superadmin**: Sistem melarang penghapusan superadmin jika jumlah superadmin aktif hanya tersisa 1. Penghapusan superadmin hanya diizinkan jika terdapat lebih dari 1 superadmin aktif di sistem.
 - **Edit Kredensial Langsung**: Halaman detail user admin menyediakan form inline untuk mengganti email dan password secara aman, tervalidasi, dan dieksekusi melalui service layer `apps.accounts.services.update_user` (mematuhi R5).
+- **Dua Jalur Reset Password**: Admin dapat mengubah password langsung dari form `Password Baru`, atau memilih **Kirim Link Reset Password**. Opsi kedua mengirim token sekali pakai yang memiliki masa berlaku terbatas ke email user; password lama tetap berlaku sampai link diselesaikan.
+- **User Activity Log**: Panel detail user menampilkan 25 aktivitas terbaru, termasuk login berhasil/gagal, perubahan profil/password, status, group, permission, 2FA, dan pengiriman/penyelesaian link reset password. Password dan token tidak pernah disimpan di log.
 - Status akun user eksplisit lewat `User.Status` (1 = aktif, 0 = nonaktif, 2 = suspend). `is_active` diturunkan dari status tersebut (satu titik invariant di `User.save()`).
 
 #### Autentikasi Dua Faktor (2FA Google Authenticator) & Dynamic Tamper Protection
@@ -240,6 +242,7 @@ Bagi operator non-teknis, alur pemberian hak akses dirancang intuitif:
 - **Enkripsi Simetris Dinamis**: Kunci enkripsi diturunkan secara dinamis per user menggunakan **HKDF-SHA256** dari `DJANGO_TWO_FACTOR_ENCRYPTION_KEY` yang digabungkan dengan UUID dan email user (`apps/common/crypto.py`).
 - **Deteksi Tamper & Auto-Reset**: Jika ciphertext di tabel database diubah secara manual atau dipindahkan antar-user, sistem mendeteksi kegagalan otentikasi pesan (`TamperDetectedError`). OTP otomatis ditolak, record 2FA di-reset (`is_enabled=False`), dan event audit `two_factor_tampered_reset` dipublikasikan.
 - **Enforcement Admin**: Middleware `TwoFactorVerificationMiddleware` memastikan setiap user yang mengaktifkan 2FA wajib memverifikasi kode OTP sebelum dapat mengakses panel `/admin/`.
+- **Reset 2FA**: Superadmin dapat mereset 2FA per-user dari halaman detail Users atau secara bulk dari daftar Users. Reset menonaktifkan dan menghapus enrollment lama; user harus melakukan setup ulang.
 
 #### Audit Trail & Soft-Delete (Tanpa Delete Permanen)
 
@@ -247,7 +250,7 @@ Bagi operator non-teknis, alur pemberian hak akses dirancang intuitif:
 - **Soft-Delete**: Tidak ada baris data yang dihapus permanen melalui sistem operasional. Penghapusan mengisi `is_deleted=True`, `deleted_at`, dan `deleted_by_id`.
 - Query normal secara default hanya membaca baris aktif (`is_deleted=False`). Developer dan kebutuhan audit dapat mengakses data lengkap melalui manager `.all_objects`.
 
-Lihat [ADR-016](docs/DECISIONS.md#adr-016--rbac-bertingkat-modulefeatureaction--pohon-organisasi) dan [ADR-017](docs/DECISIONS.md#adr-017--rbac-ux-hardening-soft-delete--audit-trail-catalog-guard-dan-dynamic-2fa-totp).
+Lihat ADR-016 (catatan Obsidian) dan ADR-017 (catatan Obsidian).
 
 ### Kenapa UUID sebagai primary key
 
@@ -301,7 +304,7 @@ di `.env` — sisanya sama.
 
 > Tidak ada mode SQLite. Kalau `DATABASE_URL` kosong atau menunjuk ke engine
 > selain PostgreSQL, proses **menolak start** — itu disengaja, lihat
-> [ADR-002](docs/DECISIONS.md#adr-002--postgresql-satu-satunya-engine-tanpa-fallback-sqlite).
+> ADR-002 (catatan Obsidian).
 
 Ganti `8000` dengan `PORT` yang benar-benar dipakai kalau tidak memakai default:
 
@@ -334,7 +337,7 @@ make verify                    # GATE: check + migrasi + test + audit keamanan
 ```
 
 `make verify` adalah yang harus hijau sebelum sebuah perubahan dianggap
-selesai — sama dengan gate di [AGENTS.md §7](AGENTS.md).
+selesai — sama dengan gate di note `ops_views/Agent/AGENTS.md` §7 pada Obsidian.
 
 ---
 
@@ -418,7 +421,7 @@ begitu akun terbentuk.
 ### Akun dummy — untuk menguji hak akses menu (seeder)
 
 `make seed` selalu membuat **superuser**, dan superuser **selalu bypass**
-`apps.access.FeatureGrant` ([ADR-012](docs/DECISIONS.md#adr-012--hak-akses-menu-berbasis-group--grant-personal-appsaccess)) —
+`apps.access.FeatureGrant` (ADR-012 (catatan Obsidian)) —
 jadi login sebagai admin tidak bisa dipakai untuk memverifikasi menu mana
 yang benar-benar tampil/tersembunyi untuk grup atau grant personal tertentu.
 `make seed-dummy` (= `manage.py seed_dummy`) mengisi celah itu: akun **staff,
@@ -457,7 +460,7 @@ fail-closed kalau `DJANGO_SEED_DUMMY_*` kosong, dan menolak jalan saat
 `DJANGO_SECRET_KEY` maupun `DJANGO_ALLOWED_HOSTS`, dan `base.py` tidak
 menyediakan default untuk `DATABASE_URL`. Kalau lupa diisi, proses gagal start
 dengan pesan jelas — bukan diam-diam jalan dengan konfigurasi tidak aman.
-Lihat [ADR-008](docs/DECISIONS.md#adr-008--settings-fail-closed).
+Lihat ADR-008 (catatan Obsidian).
 
 ---
 
@@ -467,7 +470,7 @@ Lihat [ADR-008](docs/DECISIONS.md#adr-008--settings-fail-closed).
 engine yang sama supaya perbedaan perilaku antar-backend (operator JSON, waktu
 evaluasi constraint, urutan collation, `SELECT FOR UPDATE`) tidak pernah muncul
 mendadak saat deploy. Tidak ada fallback SQLite —
-[ADR-002](docs/DECISIONS.md#adr-002--postgresql-satu-satunya-engine-tanpa-fallback-sqlite).
+ADR-002 (catatan Obsidian).
 
 Satu variable mengatur koneksinya:
 
@@ -499,7 +502,7 @@ Boot-nya fail-closed di dua titik: `DATABASE_URL` tidak ada → gagal start;
 Project ini **tidak menjalankan container PostgreSQL-nya sendiri**. Ia memakai
 container `postgres` yang sudah berjalan di mesin development dan dipakai
 bersama beberapa project — lihat
-[ADR-011](docs/DECISIONS.md#adr-011--memakai-container-postgresql-bersama-bukan-container-per-project).
+ADR-011 (catatan Obsidian).
 
 | | |
 |---|---|
@@ -605,7 +608,7 @@ pg_restore -U ops_user -d ops_views --clean ops_views_2026-09-03.dump
 `DATABASE_URL`, cache tidak fail-closed — dev/CI tanpa Redis tetap bisa
 `manage.py check`/`test` karena caching sifatnya optimisasi, bukan prasyarat
 boot. Detail keputusan di
-[ADR-015](docs/DECISIONS.md#adr-015--redis-untuk-cache-lewat-container-bersama).
+ADR-015 (catatan Obsidian).
 
 Django membaca backend cache lewat `env.cache_url()` (django-environ), yang
 otomatis memilih `django.core.cache.backends.redis.RedisCache` bawaan
@@ -621,7 +624,7 @@ REDIS_URL=redis://:PASSWORD@127.0.0.1:6379/1
 
 ### Redis lokal — container bersama (cara yang dipakai project ini)
 
-Sama seperti PostgreSQL ([ADR-011](docs/DECISIONS.md#adr-011--memakai-container-postgresql-bersama-bukan-container-per-project)),
+Sama seperti PostgreSQL (ADR-011 (catatan Obsidian)),
 project ini **tidak menjalankan container Redis-nya sendiri**. Ia memakai
 container `redis` yang sudah berjalan di mesin development dan dipakai
 bersama project lain.
@@ -740,10 +743,13 @@ NAVIGATION = [{
 }]
 ```
 
-Lalu jalankan `env/bin/python manage.py sync_catalog` supaya feature baru
-masuk katalog akses dan bisa di-grant ke group/user/org unit.
+Lalu jalankan `env/bin/python manage.py sync_catalog` supaya feature baru masuk
+katalog akses dan bisa di-grant ke group/user/org unit. Perintah yang sama
+tersedia sebagai tombol **Scan & daftarkan Modul, Feature, dan Action** di
+dashboard **Access → Modules**.
 
-**5. Daftarkan** — dua baris, selesai:
+**5. Daftarkan** — app runtime tetap perlu masuk ke settings; URL hanya perlu
+ditambahkan jika module punya endpoint HTTP:
 
 ```python
 # config/settings/base.py
@@ -757,7 +763,15 @@ path("api/incidents/", include("apps.incidents.urls")),
 python manage.py makemigrations incidents && python manage.py migrate
 ```
 
-Menu sidebar muncul otomatis — tidak ada file terpusat yang perlu diedit.
+Untuk registrasi manual tanpa mengubah source code, buka **Access → Modules →
+Add Module**, isi slug, label, dan package opsional (harus berada di namespace
+`apps.`). Setelah disimpan, sistem langsung menjalankan scan katalog. Jika
+package belum masuk `LOCAL_APPS`, record manual tetap tersimpan dan deklarasi
+`navigation.py`/`actions.py` dapat discan, tetapi menu dan admin runtime belum
+aktif sampai app tersebut didaftarkan sebagai Django app.
+
+Menu sidebar dari app yang terpasang muncul otomatis — tidak ada daftar menu
+terpusat yang perlu diedit.
 
 ### Saat tiba waktunya pecah jadi microservice
 
@@ -826,7 +840,8 @@ melenceng. Kalau butuh daftar persis apa yang terpasang, jalankan
 
 ### Menambah dependency
 
-Butuh persetujuan dulu — lihat [AGENTS.md §6](AGENTS.md).
+Butuh persetujuan dulu — lihat note `ops_views/Agent/AGENTS.md` §6 pada
+Obsidian.
 
 ```bash
 env/bin/pip install nama-paket                    # cek versi yang terpasang
@@ -1160,7 +1175,7 @@ Yang **sudah** dikonfigurasi di repo ini:
 - [x] `SECURE_SSL_REDIRECT`, `SESSION_COOKIE_SECURE`, `CSRF_COOKIE_SECURE`
 - [x] `SESSION_COOKIE_HTTPONLY`, `SameSite=Lax` untuk session & CSRF
 - [x] `X_FRAME_OPTIONS=DENY`, nosniff, `Referrer-Policy: same-origin`
-- [x] Panjang password minimum 12 karakter (default Django 8)
+- [x] Panjang password minimum 8 karakter (default Django 8)
 - [x] URL admin bisa dipindah lewat `DJANGO_ADMIN_URL`
 - [x] Hanya superuser yang bisa memberi hak staff/superuser/permission
 - [x] Seeder admin menolak jalan saat `DEBUG=False` tanpa `--force`
@@ -1170,7 +1185,8 @@ Yang **sudah** dikonfigurasi di repo ini:
 - [x] Boot ditolak kalau `DATABASE_URL` hilang atau bukan PostgreSQL
 - [x] `sslmode` default `require` — harus sengaja diturunkan
 - [x] Postgres lokal terikat `127.0.0.1`, tidak terbuka ke jaringan
-- [x] Aturan arsitektur terkunci di `AGENTS.md` + `docs/DECISIONS.md`
+- [x] Aturan arsitektur terkunci di note `ops_views/Agent/AGENTS.md` dan
+      `ops_views/Decisions/` pada Obsidian
 
 Yang harus **kamu** lakukan di server:
 

@@ -91,7 +91,7 @@ deploy-check: guard  ## Audit keamanan production, gagal pada warning apa pun
 	DATABASE_URL="postgres://ops:pw@127.0.0.1:5432/ops_views" \
 	$(PY) manage.py check --deploy --fail-level WARNING
 
-verify: db-status check  ## GATE - wajib hijau sebelum melapor selesai (AGENTS.md §7)
+verify: db-status check  ## GATE - wajib hijau sebelum melapor selesai (lihat note Agent/AGENTS.md di Obsidian)
 	@echo "==> migrasi tertinggal?"
 	@$(PY) manage.py makemigrations --check --dry-run
 	@echo "==> test"

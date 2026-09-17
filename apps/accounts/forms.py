@@ -60,6 +60,36 @@ class CustomUserChangeForm(UserChangeForm):
         return cleaned_data
 
 
+class PasswordResetConfirmForm(forms.Form):
+    """Validate the password entered through a one-time email link."""
+
+    new_password = forms.CharField(
+        label=_("Password Baru"),
+        widget=forms.PasswordInput(attrs={"autocomplete": "new-password"}),
+    )
+    confirm_new_password = forms.CharField(
+        label=_("Konfirmasi Password Baru"),
+        widget=forms.PasswordInput(attrs={"autocomplete": "new-password"}),
+    )
+
+    def __init__(self, *args, user=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.user = user
+
+    def clean(self):
+        cleaned_data = super().clean()
+        new_password = cleaned_data.get("new_password")
+        confirm_password = cleaned_data.get("confirm_new_password")
+
+        if new_password and new_password != confirm_password:
+            self.add_error(
+                "confirm_new_password", _("Konfirmasi password baru tidak cocok.")
+            )
+        if new_password and self.user is not None:
+            validate_password(new_password, self.user)
+        return cleaned_data
+
+
 class TwoFactorVerifyForm(forms.Form):
     """Challenge form for verifying Google Authenticator 6-digit TOTP code."""
 

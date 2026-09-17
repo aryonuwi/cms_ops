@@ -6,7 +6,11 @@ publication stay in one place - never in a view, admin or another module.
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Iterator
 from dataclasses import asdict, dataclass, replace
+from importlib import import_module
+from typing import Any
 
 from django.contrib.auth.models import Group
 from django.db import transaction
@@ -16,6 +20,8 @@ from apps.common.navigation import iter_actions, iter_modules, iter_navigation_g
 
 from . import events
 from .models import Action, Feature, FeatureGrant, Module, OrgUnit, OrgUnitMembership
+
+logger = logging.getLogger(__name__)
 
 
 @transaction.atomic
@@ -245,17 +251,79 @@ def create_module(
     slug: str,
     label: str,
     package: str = "",
+    registration_mode: str = Module.RegistrationMode.MANUAL,
     description: str = "",
+    is_active: bool = True,
     order: int = 0,
 ) -> Module:
-    """Register a module that is not (or not yet) installed in the codebase."""
+    """Register a module from the dashboard or another trusted write caller."""
+    _validate_manual_package(package)
     return Module.objects.create(
         slug=slug,
         label=label,
         package=package,
+        registration_mode=registration_mode,
         description=description,
+        is_active=is_active,
         order=order,
     )
+
+
+@transaction.atomic
+def update_module(
+    *,
+    module: Module,
+    slug: str,
+    label: str,
+    package: str = "",
+    description: str = "",
+    is_active: bool = True,
+    order: int = 0,
+) -> Module:
+    """Update a manually registered module through the write API."""
+    if module.registration_mode != Module.RegistrationMode.MANUAL:
+        raise ValueError("Automatically scanned modules cannot change their identity.")
+    _validate_manual_package(package)
+    module.slug = slug
+    module.label = label
+    module.package = package
+    module.description = description
+    module.is_active = is_active
+    module.order = order
+    module.save(
+        update_fields=[
+            "slug",
+            "label",
+            "package",
+            "description",
+            "is_active",
+            "order",
+            "updated_at",
+        ]
+    )
+    return module
+
+
+@transaction.atomic
+def update_module_settings(
+    *,
+    module: Module,
+    description: str = "",
+    is_active: bool = True,
+    order: int = 0,
+) -> Module:
+    """Update operator-owned settings without changing scanner-owned metadata."""
+    module.description = description
+    module.is_active = is_active
+    module.order = order
+    module.save(update_fields=["description", "is_active", "order", "updated_at"])
+    return module
+
+
+def _validate_manual_package(package: str) -> None:
+    """Keep dashboard imports inside the local ``apps`` namespace."""
+    if package and not package.startswith("apps."):
+        raise ValueError("A manual module package must start with 'apps.'.")
 
 
 @transaction.atomic
@@ -284,13 +352,13 @@ def create_action(
 def sync_catalog() -> SyncResult:
     """Refresh the Module → Feature → Action catalog from code declarations.
 
-    Code stays the source of truth (ADR-007): modules come from the app
-    registry, features from each module's ``navigation.py`` and actions from
-    each module's ``actions.py``. Every level is an idempotent upsert and
-    nothing is ever deleted - entries that disappear from code are kept,
-    because deactivating them is an operator decision and grants may still
-    reference them. Operator-managed columns (description, required_permission,
-    is_active, order) are deliberately left untouched.
+    Code stays the source of truth for automatic modules (ADR-007); manually
+    registered packages may also provide ``navigation.py`` and ``actions.py``.
+    Every level is an idempotent upsert and nothing is ever deleted - entries
+    that disappear from code are kept, because deactivating them is an operator
+    decision and grants may still reference them. Operator-managed columns
+    (description, required_permission, is_active, order) are deliberately left
+    untouched.
     """
     result = SyncResult()
 
@@ -298,21 +366,29 @@ def sync_catalog() -> SyncResult:
     for slug, package, label in iter_modules():
         _module, was_created = Module.objects.update_or_create(
             slug=slug,
-            defaults={"label": label, "package": package},
+            defaults={
+                "label": label,
+                "package": package,
+                "registration_mode": Module.RegistrationMode.AUTOMATIC,
+            },
         )
         if was_created:
             result = replace(result, modules_created=result.modules_created + 1)
         else:
             result = replace(result, modules_updated=result.modules_updated + 1)
 
-    for app_name, group in iter_navigation_groups():
+    navigation_groups = list(iter_navigation_groups())
+    navigation_groups.extend(_iter_manual_navigation_groups())
+    for module_name, group in navigation_groups:
+        module_slug = (
+            module_name.rsplit(".", 1)[-1]
+            if module_name.startswith("apps.")
+            else module_name
+        )
         for item in group.get("items", []):
             slug = item.get("feature")
             if not slug:
                 continue
-            # ``app_name`` is the dotted "apps.accounts"; the short label is the
-            # Module slug, which is what Feature.module stores.
-            module_slug = app_name.rsplit(".", 1)[-1]
             _feature, was_created = Feature.objects.update_or_create(
                 slug=slug,
                 defaults={
@@ -325,7 +401,9 @@ def sync_catalog() -> SyncResult:
             else:
                 result = replace(result, features_updated=result.features_updated + 1)
 
-    for app_label, declaration in iter_actions():
+    action_declarations = list(iter_actions())
+    action_declarations.extend(_iter_manual_actions())
+    for app_label, declaration in action_declarations:
         feature_slug = declaration.get("feature")
         code = declaration.get("code")
         if not feature_slug or not code:
@@ -357,6 +435,50 @@ def sync_catalog() -> SyncResult:
 
     transaction.on_commit(lambda: publish(events.catalog_synced(**asdict(result))))
     return result
+
+
+def _iter_manual_navigation_groups() -> Iterator[tuple[str, dict[str, Any]]]:
+    """Read declarations from manual modules that are not Django-installed."""
+    installed_packages = {package for _slug, package, _label in iter_modules()}
+    for module in Module.objects.filter(
+        registration_mode=Module.RegistrationMode.MANUAL,
+    ).exclude(package=""):
+        if module.package in installed_packages:
+            continue
+        try:
+            navigation = import_module(f"{module.package}.navigation")
+        except ModuleNotFoundError:
+            continue
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "manual_module.navigation_import_failed",
+                extra={"module": module.slug},
+            )
+            continue
+        for group in getattr(navigation, "NAVIGATION", []):
+            yield module.slug, group
+
+
+def _iter_manual_actions() -> Iterator[tuple[str, dict[str, Any]]]:
+    """Read action declarations from manual modules outside the app registry."""
+    installed_packages = {package for _slug, package, _label in iter_modules()}
+    for module in Module.objects.filter(
+        registration_mode=Module.RegistrationMode.MANUAL,
+    ).exclude(package=""):
+        if module.package in installed_packages:
+            continue
+        try:
+            actions = import_module(f"{module.package}.actions")
+        except ModuleNotFoundError:
+            continue
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "manual_module.actions_import_failed",
+                extra={"module": module.slug},
+            )
+            continue
+        for action in getattr(actions, "ACTIONS", []):
+            yield module.slug, action
 
 
 def _would_cycle(org_unit: OrgUnit, new_parent: OrgUnit) -> bool:

@@ -44,10 +44,11 @@ class SuperuserOnlyAdmin:
 
 
 class CatalogReadOnlyAdmin(SuperuserOnlyAdmin):
-    """Guards catalog items (Module, Feature, Action) from manual UI creation.
+    """Guards generated catalog children from manual UI creation.
 
-    Slugs and labels are auto-generated from module code declarations (navigation.py
-    and actions.py). They are strictly synced via services.sync_catalog.
+    Feature and action metadata come from module code declarations
+    (navigation.py and actions.py) and are strictly synced via
+    services.sync_catalog. ModuleAdmin adds the separate manual registration path.
     """
 
     def has_add_permission(self, request):
@@ -58,7 +59,7 @@ class CatalogReadOnlyAdmin(SuperuserOnlyAdmin):
 
     actions = ["sync_catalog_action"]
 
-    @admin.action(description=_("🔄 Sinkronisasi Katalog dari File Modul (actions.py & navigation.py)"))
+    @admin.action(description=_("🔄 Scan & daftarkan Modul, Feature, dan Action"))
     def sync_catalog_action(self, request, queryset=None):
         res = services.sync_catalog()
         self.message_user(
@@ -69,6 +70,20 @@ class CatalogReadOnlyAdmin(SuperuserOnlyAdmin):
             ),
             messages.SUCCESS,
         )
+
+
+class ModuleForm(forms.ModelForm):
+    """Validate the package namespace used by manual dashboard scanning."""
+
+    class Meta:
+        model = Module
+        fields = "__all__"
+
+    def clean_package(self):
+        package = self.cleaned_data.get("package", "").strip()
+        if package and not package.startswith("apps."):
+            raise ValidationError(_("Package manual harus berada di namespace apps."))
+        return package
 
 
 @admin.register(Group)
@@ -166,10 +181,59 @@ class FeatureAdmin(CatalogReadOnlyAdmin, BaseModelAdmin):
 
 @admin.register(Module)
 class ModuleAdmin(CatalogReadOnlyAdmin, BaseModelAdmin):
-    list_display = ("label", "slug", "package", "is_active", "order")
-    list_filter = ("is_active",)
+    form = ModuleForm
+    list_display = ("label", "slug", "package", "registration_mode", "is_active", "order")
+    list_filter = ("registration_mode", "is_active")
     search_fields = ("slug", "label", "package")
-    readonly_fields = ("slug", "label", "package", "description", "order")
+
+    def has_add_permission(self, request):
+        """Allow superusers to register a module manually from the dashboard."""
+        return request.user.is_superuser
+
+    def get_readonly_fields(self, request, obj=None):
+        readonly = list(super().get_readonly_fields(request, obj))
+        if "registration_mode" not in readonly:
+            readonly.append("registration_mode")
+        if obj is None or obj.registration_mode == Module.RegistrationMode.MANUAL:
+            return tuple(readonly)
+        return tuple(
+            dict.fromkeys(
+                [*readonly, "slug", "label", "package"]
+            )
+        )
+
+    def save_model(self, request, obj, form, change):
+        if change:
+            if obj.registration_mode == Module.RegistrationMode.MANUAL:
+                services.update_module(
+                    module=obj,
+                    slug=form.cleaned_data.get("slug", obj.slug),
+                    label=form.cleaned_data.get("label", obj.label),
+                    package=form.cleaned_data.get("package", obj.package),
+                    description=form.cleaned_data.get("description", obj.description),
+                    is_active=form.cleaned_data.get("is_active", obj.is_active),
+                    order=form.cleaned_data.get("order", obj.order),
+                )
+            else:
+                services.update_module_settings(
+                    module=obj,
+                    description=form.cleaned_data.get("description", obj.description),
+                    is_active=form.cleaned_data.get("is_active", obj.is_active),
+                    order=form.cleaned_data.get("order", obj.order),
+                )
+            services.sync_catalog()
+            return
+
+        created = services.create_module(
+            slug=form.cleaned_data["slug"],
+            label=form.cleaned_data["label"],
+            package=form.cleaned_data.get("package", ""),
+            description=form.cleaned_data.get("description", ""),
+            is_active=form.cleaned_data.get("is_active", True),
+            order=form.cleaned_data.get("order", 0),
+        )
+        obj.__dict__.update(created.__dict__)
+        services.sync_catalog()
 
 
 @admin.register(Action)

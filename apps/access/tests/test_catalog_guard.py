@@ -27,7 +27,7 @@ class CatalogGuardAndDynamicActionTests(TestCase):
         self.feature = Feature.objects.create(slug="testfeat", label="Test Feature", module="testmod")
         self.action = services.create_action(feature=self.feature, code="view", label="View")
 
-    def test_catalog_admins_disallow_manual_add(self):
+    def test_module_admin_allows_manual_add_but_catalog_children_do_not(self):
         request = self.factory.get("/admin/")
         request.user = self.superuser
 
@@ -35,13 +35,56 @@ class CatalogGuardAndDynamicActionTests(TestCase):
         feat_admin = FeatureAdmin(Feature, self.site)
         act_admin = ActionAdmin(Action, self.site)
 
-        self.assertFalse(mod_admin.has_add_permission(request))
+        self.assertTrue(mod_admin.has_add_permission(request))
         self.assertFalse(feat_admin.has_add_permission(request))
         self.assertFalse(act_admin.has_add_permission(request))
 
         self.assertFalse(mod_admin.has_delete_permission(request))
         self.assertFalse(feat_admin.has_delete_permission(request))
         self.assertFalse(act_admin.has_delete_permission(request))
+
+    def test_manual_module_can_be_added_from_dashboard(self):
+        request = self.factory.get("/admin/")
+        request.user = self.superuser
+        mod_admin = ModuleAdmin(Module, self.site)
+
+        form_class = mod_admin.get_form(request)
+        form = form_class(
+            data={
+                "slug": "dashboard-module",
+                "label": "Dashboard Module",
+                "package": "",
+                "description": "Registered by an operator.",
+                "is_active": True,
+                "order": 30,
+            }
+        )
+        self.assertTrue(form.is_valid(), form.errors)
+
+        obj = form.save(commit=False)
+        mod_admin.save_model(request, obj, form, change=False)
+
+        module = Module.objects.get(slug="dashboard-module")
+        self.assertEqual(module.registration_mode, Module.RegistrationMode.MANUAL)
+        self.assertEqual(module.label, "Dashboard Module")
+
+    def test_automatic_module_identity_is_read_only(self):
+        module = Module.objects.create(
+            slug="automatic-module",
+            label="Automatic Module",
+            package="apps.automatic_module",
+            registration_mode=Module.RegistrationMode.AUTOMATIC,
+        )
+        request = self.factory.get("/admin/")
+        request.user = self.superuser
+        mod_admin = ModuleAdmin(Module, self.site)
+
+        readonly = mod_admin.get_readonly_fields(request, module)
+
+        self.assertIn("slug", readonly)
+        self.assertIn("label", readonly)
+        self.assertIn("package", readonly)
+        self.assertIn("registration_mode", readonly)
 
     def test_dynamic_action_widget_data_feature_attribute(self):
         form = FeatureGrantForm()

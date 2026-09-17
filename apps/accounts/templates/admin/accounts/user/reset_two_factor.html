@@ -1,0 +1,18 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block content %}
+    <div id="content-main">
+        <h1>{% trans "Reset 2FA" %}</h1>
+        <p>
+            {% blocktrans with email=user_obj.email %}
+                Reset autentikasi dua faktor untuk {{ email }}? User harus melakukan setup 2FA kembali.
+            {% endblocktrans %}
+        </p>
+        <form method="post">
+            {% csrf_token %}
+            <button type="submit" class="default">{% trans "Ya, reset 2FA" %}</button>
+            <a href="{{ cancel_url }}">{% trans "Batal" %}</a>
+        </form>
+    </div>
+{% endblock %}

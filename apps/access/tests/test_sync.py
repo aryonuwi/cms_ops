@@ -1,6 +1,8 @@
 """The catalog sync: code declares, the database records, operators decide."""
 
 from io import StringIO
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from django.core.management import call_command
 from django.test import TestCase
@@ -24,6 +26,7 @@ class SyncCatalogTests(TestCase):
 
         module = Module.objects.get(slug="accounts")
         self.assertEqual(module.package, "apps.accounts")
+        self.assertEqual(module.registration_mode, Module.RegistrationMode.AUTOMATIC)
 
         users = Feature.objects.get(slug="accounts.users")
         self.assertEqual(users.label, "Users")
@@ -102,3 +105,43 @@ class SyncCatalogTests(TestCase):
         self.assertEqual(received[0].payload["modules_created"], result.modules_created)
         self.assertEqual(received[0].payload["features_created"], result.features_created)
         self.assertEqual(received[0].payload["actions_created"], result.actions_created)
+
+    def test_manual_module_package_declarations_are_scanned(self):
+        services.create_module(
+            slug="manual_reports",
+            label="Manual Reports",
+            package="apps.manual_reports",
+        )
+        navigation_module = SimpleNamespace(
+            NAVIGATION=[
+                {
+                    "items": [
+                        {"title": "Inbox", "feature": "manual_reports.inbox"},
+                    ]
+                }
+            ]
+        )
+        actions_module = SimpleNamespace(
+            ACTIONS=[
+                {
+                    "feature": "manual_reports.inbox",
+                    "code": "approve",
+                    "label": "Approve inbox",
+                }
+            ]
+        )
+
+        def import_manual_module(name):
+            if name == "apps.manual_reports.navigation":
+                return navigation_module
+            if name == "apps.manual_reports.actions":
+                return actions_module
+            raise ModuleNotFoundError(name)
+
+        with patch("apps.access.services.import_module", side_effect=import_manual_module):
+            services.sync_catalog()
+
+        feature = Feature.objects.get(slug="manual_reports.inbox")
+        action = Action.objects.get(slug="manual_reports.inbox.approve")
+        self.assertEqual(feature.module, "manual_reports")
+        self.assertEqual(action.feature_id, feature.pk)

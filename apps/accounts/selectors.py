@@ -10,11 +10,21 @@ from __future__ import annotations
 from django.contrib.auth.models import Group, Permission
 from django.db.models import QuerySet
 
-from .models import User
+from .models import User, UserActivity
 
 
 def get_user_by_id(user_id) -> User | None:
     return User.objects.filter(pk=user_id).first()
+
+
+def list_user_activities(*, user_id, limit: int = 25) -> QuerySet[UserActivity]:
+    """Return the newest activity rows for one user detail panel."""
+    return UserActivity.objects.filter(user_id=user_id).order_by("-created_at")[:limit]
+
+
+def list_users_by_ids(*, user_ids) -> QuerySet[User]:
+    """Resolve activity actors in one query without adding a cross-module FK."""
+    return User.all_objects.filter(pk__in=user_ids)
 
 
 def get_user_by_email(email: str) -> User | None:

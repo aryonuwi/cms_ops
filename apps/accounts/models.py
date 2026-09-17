@@ -174,3 +174,62 @@ class UserTwoFactor(BaseModel):
     def __str__(self) -> str:
         status_str = "enabled" if self.is_enabled else "pending"
         return f"2FA({self.user_id}): {status_str}"
+
+
+class UserActivity(BaseModel):
+    """Immutable-style security and account activity for operators.
+
+    ``user_id`` and ``actor_id`` stay as UUIDs rather than foreign keys so the
+    accounts module can be split without coupling its audit table to another
+    module's database. Passwords and reset tokens are deliberately never
+    stored in ``details``.
+    """
+
+    class Action(models.TextChoices):
+        USER_CREATED = "user_created", _("User dibuat")
+        USER_UPDATED = "user_updated", _("Profil user diperbarui")
+        USER_DELETED = "user_deleted", _("User dinonaktifkan")
+        PASSWORD_CHANGED = "password_changed", _("Password diubah")
+        PASSWORD_RESET_REQUESTED = "password_reset_requested", _(
+            "Link reset password dikirim"
+        )
+        PASSWORD_RESET_COMPLETED = "password_reset_completed", _(
+            "Password di-reset melalui link"
+        )
+        USER_ACTIVATED = "user_activated", _("User diaktifkan")
+        USER_SUSPENDED = "user_suspended", _("User ditangguhkan")
+        USER_DEACTIVATED = "user_deactivated", _("User dinonaktifkan")
+        GROUP_ASSIGNED = "group_assigned", _("Group ditambahkan")
+        GROUP_UNASSIGNED = "group_unassigned", _("Group dihapus")
+        PERMISSION_GRANTED = "permission_granted", _("Permission diberikan")
+        PERMISSION_REVOKED = "permission_revoked", _("Permission dicabut")
+        TWO_FACTOR_SETUP = "two_factor_setup", _("Setup 2FA dimulai")
+        TWO_FACTOR_ENABLED = "two_factor_enabled", _("2FA diaktifkan")
+        TWO_FACTOR_DISABLED = "two_factor_disabled", _("2FA di-reset")
+        LOGIN_SUCCESS = "login_success", _("Login berhasil")
+        LOGIN_FAILED = "login_failed", _("Login gagal")
+        LOGOUT = "logout", _("Logout")
+
+    user_id = models.UUIDField(
+        _("user id"), null=True, blank=True, db_index=True
+    )
+    actor_id = models.UUIDField(
+        _("actor id"), null=True, blank=True, db_index=True
+    )
+    action = models.CharField(
+        _("action"), max_length=64, choices=Action.choices, db_index=True
+    )
+    description = models.CharField(_("description"), max_length=255, blank=True)
+    details = models.JSONField(_("details"), default=dict, blank=True)
+    ip_address = models.GenericIPAddressField(
+        _("IP address"), null=True, blank=True
+    )
+    user_agent = models.TextField(_("user agent"), blank=True)
+
+    class Meta:
+        verbose_name = _("user activity")
+        verbose_name_plural = _("user activities")
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"{self.action}({self.user_id})"

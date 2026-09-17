@@ -22,8 +22,15 @@ class RegisterUserTests(TestCase):
 
     def test_rejects_weak_password(self):
         with self.assertRaises(ValidationError):
-            services.register_user(email="weak@example.com", password="12345")
+            services.register_user(email="weak@example.com", password="Abc!234")
         self.assertIsNone(selectors.get_user_by_email("weak@example.com"))
+
+    def test_accepts_eight_character_password(self):
+        user = services.register_user(
+            email="minimum@example.com",
+            password="Abc!2345",
+        )
+        self.assertTrue(user.check_password("Abc!2345"))
 
     def test_publishes_event_after_commit(self):
         received = []
