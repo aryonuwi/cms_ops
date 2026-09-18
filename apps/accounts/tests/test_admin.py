@@ -1,4 +1,5 @@
 import pyotp
+from django.contrib import admin
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group, Permission
 from django.test import RequestFactory, TestCase, override_settings
@@ -39,6 +40,18 @@ class UserAdminReadonlyTests(TestCase):
         readonly = self._readonly(self.staff)
         for field in PRIVILEGED_FIELDS:
             self.assertIn(field, readonly)
+
+    def test_non_superuser_cannot_change_or_delete_staff_objects(self):
+        request = self.factory.get("/admin/accounts/user/")
+        request.user = self.staff
+        target = User.objects.create_user(
+            email="target-staff@example.com",
+            password="pw",
+            is_staff=True,
+        )
+
+        self.assertFalse(self.admin.has_change_permission(request, target))
+        self.assertFalse(self.admin.has_delete_permission(request, target))
 
     def test_change_form_uses_one_inline_password_form(self):
         credential_fields = UserAdmin.fieldsets[0][1]["fields"]
@@ -144,3 +157,15 @@ class UserAdminTwoFactorResetTests(TestCase):
             reverse("admin:accounts_user_change", args=[self.target.pk]),
         )
         self.assertFalse(services.selectors.is_two_factor_enabled(self.target))
+
+    def test_builtin_per_user_password_route_is_not_a_third_reset_flow(self):
+        self.client.force_login(self.superuser)
+        response = self.client.get(
+            f"/admin/accounts/user/{self.target.pk}/password/"
+        )
+
+        self.assertEqual(response.status_code, 302)
+        route_names = {
+            pattern.name for pattern in admin.site._registry[User].get_urls()
+        }
+        self.assertNotIn("auth_user_password_change", route_names)

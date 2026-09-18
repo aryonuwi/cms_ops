@@ -84,6 +84,8 @@ def update_user(
     last_name: str | None = None,
     email: str | None = None,
     new_password: str | None = None,
+    is_staff: bool | None = None,
+    is_superuser: bool | None = None,
     updated_by_id: uuid.UUID | None = None,
 ) -> User:
     """Change only the profile fields that were provided.
@@ -118,6 +120,14 @@ def update_user(
         user.set_password(new_password)
         update_fields.append("password")
         password_changed = True
+    if is_staff is not None and is_staff != user.is_staff:
+        user.is_staff = is_staff
+        update_fields.append("is_staff")
+        changed_profile_fields.append("is_staff")
+    if is_superuser is not None and is_superuser != user.is_superuser:
+        user.is_superuser = is_superuser
+        update_fields.append("is_superuser")
+        changed_profile_fields.append("is_superuser")
     if updated_by_id is not None:
         user.updated_by_id = updated_by_id
         update_fields.append("updated_by_id")

@@ -11,7 +11,7 @@ from django.urls import path, reverse
 from django.utils.html import format_html, format_html_join
 from django.utils.timezone import localtime
 from django.utils.translation import gettext_lazy as _
-from unfold.forms import AdminPasswordChangeForm, UserCreationForm
+from unfold.forms import UserCreationForm
 
 from apps.access import selectors as access_selectors
 from apps.common.admin import BaseModelAdmin
@@ -27,7 +27,6 @@ class UserAdmin(BaseUserAdmin, BaseModelAdmin):
     change_form_template = "admin/accounts/user/change_form.html"
     form = CustomUserChangeForm
     add_form = UserCreationForm
-    change_password_form = AdminPasswordChangeForm
 
     list_display = (
         "email",
@@ -52,6 +51,8 @@ class UserAdmin(BaseUserAdmin, BaseModelAdmin):
         "created_by_id",
         "updated_by_id",
         "user_activity_summary",
+        "password_reset_panel",
+        "password_policy_hint",
     )
 
     fieldsets = (
@@ -59,7 +60,13 @@ class UserAdmin(BaseUserAdmin, BaseModelAdmin):
             _("Kredensial Akun"),
             {
                 "classes": ("tab",),
-                "fields": ("email", "new_password", "confirm_new_password"),
+                "fields": (
+                    "email",
+                    "new_password",
+                    "confirm_new_password",
+                    "password_policy_hint",
+                    "password_reset_panel",
+                ),
                 "description": _(
                     "Alamat email login dan satu form Password Baru. Biarkan kosong jika password tidak ingin diubah."
                 ),
@@ -133,7 +140,13 @@ class UserAdmin(BaseUserAdmin, BaseModelAdmin):
         ),
     )
 
-    actions = ["reset_two_factor_action"]
+    actions = ["reset_two_factor_action", "send_password_reset_action"]
+
+    def get_list_display(self, request):
+        fields = list(super().get_list_display(request))
+        if request.user.is_superuser:
+            fields.append("password_reset_action")
+        return tuple(fields)
 
     def get_urls(self):
         custom_urls = [
@@ -148,7 +161,27 @@ class UserAdmin(BaseUserAdmin, BaseModelAdmin):
                 name="accounts_user_send_password_reset",
             ),
         ]
-        return custom_urls + super().get_urls()
+        # Keep the two supported password flows explicit: the inline form above
+        # and the emailed reset link.  BaseUserAdmin.get_urls() also exposes
+        # Django's third per-user ``/<id>/password/`` form, which bypasses our
+        # service layer and activity log.
+        return custom_urls + super(BaseUserAdmin, self).get_urls()
+
+    def get_fieldsets(self, request, obj=None):
+        fieldsets = super().get_fieldsets(request, obj)
+        if obj is None or request.user.is_superuser:
+            return fieldsets
+
+        filtered_fieldsets = []
+        for name, options in fieldsets:
+            options = dict(options)
+            options["fields"] = tuple(
+                field
+                for field in options["fields"]
+                if field != "password_reset_panel"
+            )
+            filtered_fieldsets.append((name, options))
+        return tuple(filtered_fieldsets)
 
     def changeform_view(
         self,
@@ -161,10 +194,6 @@ class UserAdmin(BaseUserAdmin, BaseModelAdmin):
         if object_id and request.user.is_superuser:
             extra_context["two_factor_reset_url"] = reverse(
                 "admin:accounts_user_reset_two_factor",
-                args=[object_id],
-            )
-            extra_context["password_reset_url"] = reverse(
-                "admin:accounts_user_send_password_reset",
                 args=[object_id],
             )
         return super().changeform_view(request, object_id, form_url, extra_context)
@@ -235,6 +264,62 @@ class UserAdmin(BaseUserAdmin, BaseModelAdmin):
             context,
         )
 
+    @admin.display(description=_("Reset Password"))
+    def password_reset_action(self, obj):
+        """Expose the same confirmed reset flow directly from the user list."""
+        url = reverse(
+            "admin:accounts_user_send_password_reset",
+            args=[obj.pk],
+        )
+        return format_html(
+            '<a href="{}" class="text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300 font-medium whitespace-nowrap">{}</a>',
+            url,
+            _("Kirim Link"),
+        )
+
+    @admin.display(description=_("Reset Password via Email"))
+    def password_reset_panel(self, obj):
+        if obj is None:
+            return "—"
+        url = reverse(
+            "admin:accounts_user_send_password_reset",
+            args=[obj.pk],
+        )
+        return format_html(
+            '<div class="password-reset-panel">'
+            '<a href="{}" class="password-reset-panel__button">'
+            '<span class="material-symbols-outlined">mail</span>{}</a>'
+            '<p class="password-reset-panel__help">{}</p></div>',
+            url,
+            _("Generate & Kirim Link Reset Password"),
+            _("Password lama tetap berlaku sampai user menyelesaikan reset dari email."),
+        )
+
+    @admin.display(description=_("Password Policy"))
+    def password_policy_hint(self, obj):
+        return format_html(
+            '<div class="password-policy" data-password-policy>'
+            '<div class="password-policy__heading">'
+            '<span class="material-symbols-outlined">verified_user</span>{}</div>'
+            '<div class="password-policy__note">{}</div>'
+            '<div class="password-policy__rules">'
+            '<div class="password-rule" data-rule="length">'
+            '<span class="password-rule__icon">○</span><span>{}</span></div>'
+            '<div class="password-rule" data-rule="match">'
+            '<span class="password-rule__icon">○</span><span>{}</span></div>'
+            '<div class="password-rule" data-rule="not-numeric">'
+            '<span class="password-rule__icon">○</span><span>{}</span></div>'
+            '<div class="password-rule password-rule--server">'
+            '<span class="password-rule__icon">◆</span><span>{}</span></div>'
+            '</div></div>',
+            _("Kriteria Password Baru"),
+            _("Kosongkan kedua field jika password tidak ingin diubah."),
+            _("Minimal 8 karakter"),
+            _("Konfirmasi password harus cocok"),
+            _("Tidak boleh hanya berisi angka"),
+            _("Common password dan kemiripan diperiksa saat simpan"),
+        )
+
     @admin.action(description=_("Reset / Nonaktifkan 2FA untuk pengguna yang dipilih"))
     def reset_two_factor_action(self, request, queryset):
         if not request.user.is_superuser:
@@ -251,6 +336,30 @@ class UserAdmin(BaseUserAdmin, BaseModelAdmin):
         self.message_user(
             request,
             _(f"2FA berhasil di-reset untuk {count} pengguna."),
+            messages.SUCCESS,
+        )
+
+    @admin.action(description=_("Kirim Link Reset Password ke pengguna yang dipilih"))
+    def send_password_reset_action(self, request, queryset):
+        if not request.user.is_superuser:
+            self.message_user(
+                request,
+                _("Hanya superadmin yang dapat mengirim link reset password."),
+                messages.ERROR,
+            )
+            return
+
+        for user in queryset:
+            services.send_password_reset_link(
+                user=user,
+                site_url=request.build_absolute_uri("/"),
+                requested_by_id=request.user.pk,
+                ip_address=request.META.get("REMOTE_ADDR"),
+                user_agent=request.META.get("HTTP_USER_AGENT", ""),
+            )
+        self.message_user(
+            request,
+            _(f"Link reset password berhasil dikirim ke {queryset.count()} pengguna."),
             messages.SUCCESS,
         )
 
@@ -273,6 +382,10 @@ class UserAdmin(BaseUserAdmin, BaseModelAdmin):
         return access_selectors.user_can(request.user, "accounts.users.create")
 
     def has_change_permission(self, request, obj=None):
+        if obj is not None and not request.user.is_superuser and (
+            obj.is_staff or obj.is_superuser
+        ):
+            return False
         return access_selectors.user_can(request.user, "accounts.users.edit")
 
     def has_delete_permission(self, request, obj=None):
@@ -280,6 +393,10 @@ class UserAdmin(BaseUserAdmin, BaseModelAdmin):
         # A superadmin cannot be deleted if active superadmin count <= 1.
         # admin@ops.local cannot be deleted unless another active superadmin exists.
         if not access_selectors.user_can(request.user, "accounts.users.delete"):
+            return False
+        if obj is not None and not request.user.is_superuser and (
+            obj.is_staff or obj.is_superuser
+        ):
             return False
         if obj is not None and obj.is_superuser:
             superadmin_count = accounts_selectors.count_active_superadmins()
@@ -292,54 +409,49 @@ class UserAdmin(BaseUserAdmin, BaseModelAdmin):
     def save_model(self, request, obj, form, change):
         # R5: delegate credential changes through services.py
         if change and form:
+            original = accounts_selectors.get_user_by_id(obj.pk)
+            if original is None:
+                raise Http404
+
             new_pw = form.cleaned_data.get("new_password")
             email = form.cleaned_data.get("email")
             first_name = form.cleaned_data.get("first_name")
             last_name = form.cleaned_data.get("last_name")
 
             services.update_user(
-                user=obj,
+                user=original,
                 first_name=first_name,
                 last_name=last_name,
                 email=email,
                 new_password=new_pw,
+                is_staff=(
+                    form.cleaned_data.get("is_staff")
+                    if request.user.is_superuser
+                    else None
+                ),
+                is_superuser=(
+                    form.cleaned_data.get("is_superuser")
+                    if request.user.is_superuser
+                    else None
+                ),
                 updated_by_id=request.user.pk,
             )
 
             if request.user.is_superuser:
                 status = form.cleaned_data.get("status")
                 if status is not None and status != form.initial.get("status"):
-                    # ModelForm has already copied the new value onto obj;
-                    # restore the persisted value so the service can apply the
-                    # transition and publish its event exactly once.
-                    obj.status = form.initial.get("status")
                     if status == User.Status.ACTIVE:
-                        services.activate_user(user=obj, requested_by_id=request.user.pk)
+                        services.activate_user(
+                            user=original, requested_by_id=request.user.pk
+                        )
                     elif status == User.Status.SUSPENDED:
-                        services.suspend_user(user=obj, requested_by_id=request.user.pk)
+                        services.suspend_user(
+                            user=original, requested_by_id=request.user.pk
+                        )
                     else:
-                        services.deactivate_user(user=obj, requested_by_id=request.user.pk)
-                is_staff = form.cleaned_data.get("is_staff")
-                if is_staff is not None and is_staff != form.initial.get("is_staff"):
-                    obj.is_staff = is_staff
-                    obj.save(update_fields=["is_staff"])
-                is_superuser = form.cleaned_data.get("is_superuser")
-                if is_superuser is not None and is_superuser != form.initial.get("is_superuser"):
-                    obj.is_superuser = is_superuser
-                    obj.save(update_fields=["is_superuser"])
-                privileged_changes = [
-                    field
-                    for field in ("is_staff", "is_superuser")
-                    if field in form.changed_data
-                ]
-                if privileged_changes:
-                    services.record_activity(
-                        user_id=obj.pk,
-                        actor_id=request.user.pk,
-                        action=UserActivity.Action.USER_UPDATED,
-                        description="Hak akses user diperbarui.",
-                        details={"fields": privileged_changes},
-                    )
+                        services.deactivate_user(
+                            user=original, requested_by_id=request.user.pk
+                        )
         else:
             if not getattr(obj, "created_by_id", None):
                 obj.created_by_id = request.user.pk
@@ -353,60 +465,64 @@ class UserAdmin(BaseUserAdmin, BaseModelAdmin):
             )
 
     def save_related(self, request, form, formsets, change):
-        """Record group and personal-permission changes after Django saves them."""
-        user = form.instance
-        before_groups = {
-            group.pk: group.name for group in user.groups.all()
-        }
-        before_permissions = {
-            permission.pk: permission.codename
-            for permission in user.user_permissions.all()
-        }
+        """Reconcile account M2M access through the accounts service layer."""
+        if not change:
+            return
 
-        super().save_related(request, form, formsets, change)
+        user = accounts_selectors.get_user_by_id(form.instance.pk)
+        if user is None:
+            raise Http404
 
-        after_groups = {group.pk: group.name for group in user.groups.all()}
-        after_permissions = {
-            permission.pk: permission.codename
-            for permission in user.user_permissions.all()
-        }
-        for group_id in after_groups.keys() - before_groups.keys():
-            services.record_activity(
-                user_id=user.pk,
-                actor_id=request.user.pk,
-                action=UserActivity.Action.GROUP_ASSIGNED,
-                description=f"Group {after_groups[group_id]} ditambahkan.",
-                details={"group_id": str(group_id)},
-            )
-        for group_id in before_groups.keys() - after_groups.keys():
-            services.record_activity(
-                user_id=user.pk,
-                actor_id=request.user.pk,
-                action=UserActivity.Action.GROUP_UNASSIGNED,
-                description=f"Group {before_groups[group_id]} dihapus.",
-                details={"group_id": str(group_id)},
-            )
-        for permission_id in after_permissions.keys() - before_permissions.keys():
-            services.record_activity(
-                user_id=user.pk,
-                actor_id=request.user.pk,
-                action=UserActivity.Action.PERMISSION_GRANTED,
-                description=f"Permission {after_permissions[permission_id]} diberikan.",
-                details={"permission_id": permission_id},
-            )
-        for permission_id in before_permissions.keys() - after_permissions.keys():
-            services.record_activity(
-                user_id=user.pk,
-                actor_id=request.user.pk,
-                action=UserActivity.Action.PERMISSION_REVOKED,
-                description=f"Permission {before_permissions[permission_id]} dicabut.",
-                details={"permission_id": permission_id},
-            )
+        if "groups" in form.cleaned_data:
+            current_groups = {group.pk: group for group in user.groups.all()}
+            desired_groups = {
+                group.pk: group for group in form.cleaned_data["groups"]
+            }
+            for group_id in desired_groups.keys() - current_groups.keys():
+                services.assign_group(
+                    user=user,
+                    group=desired_groups[group_id],
+                    requested_by_id=request.user.pk,
+                )
+            for group_id in current_groups.keys() - desired_groups.keys():
+                services.unassign_group(
+                    user=user,
+                    group=current_groups[group_id],
+                    requested_by_id=request.user.pk,
+                )
+
+        if "user_permissions" in form.cleaned_data:
+            current_permissions = {
+                permission.pk: permission for permission in user.user_permissions.all()
+            }
+            desired_permissions = {
+                permission.pk: permission
+                for permission in form.cleaned_data["user_permissions"]
+            }
+            for permission_id in desired_permissions.keys() - current_permissions.keys():
+                services.grant_permission(
+                    user=user,
+                    permission=desired_permissions[permission_id],
+                    requested_by_id=request.user.pk,
+                )
+            for permission_id in current_permissions.keys() - desired_permissions.keys():
+                services.revoke_permission(
+                    user=user,
+                    permission=current_permissions[permission_id],
+                    requested_by_id=request.user.pk,
+                )
 
     def delete_model(self, request, obj):
+        if not request.user.is_superuser and (obj.is_staff or obj.is_superuser):
+            raise PermissionDenied
         services.delete_user(user=obj, requested_by=request.user)
 
     def delete_queryset(self, request, queryset):
+        if not request.user.is_superuser and (
+            queryset.filter(is_staff=True).exists()
+            or queryset.filter(is_superuser=True).exists()
+        ):
+            raise PermissionDenied
         for user in queryset:
             services.delete_user(user=user, requested_by=request.user)
 

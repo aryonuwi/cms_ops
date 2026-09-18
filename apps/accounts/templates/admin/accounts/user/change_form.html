@@ -7,8 +7,39 @@
         {% trans "Reset 2FA" as title %}
         {% include "unfold/helpers/tab_action.html" with title=title link=two_factor_reset_url icon="restart_alt" %}
     {% endif %}
-    {% if password_reset_url %}
-        {% trans "Kirim Link Reset Password" as title %}
-        {% include "unfold/helpers/tab_action.html" with title=title link=password_reset_url icon="mail" %}
-    {% endif %}
+{% endblock %}
+
+{% block admin_change_form_document_ready %}
+    {{ block.super }}
+    <script>
+        (function () {
+            const policy = document.querySelector("[data-password-policy]");
+            const password = document.getElementById("id_new_password");
+            const confirmation = document.getElementById("id_confirm_new_password");
+            if (!policy || !password || !confirmation) return;
+
+            const setRule = (name, valid) => {
+                const rule = policy.querySelector('[data-rule="' + name + '"]');
+                if (!rule) return;
+                rule.classList.toggle("is-valid", valid);
+                const icon = rule.querySelector(".password-rule__icon");
+                if (icon) icon.textContent = valid ? "✓" : "○";
+            };
+
+            const updatePolicy = () => {
+                const value = password.value;
+                const hasValue = value.length > 0;
+                setRule("length", hasValue && value.length >= 8);
+                setRule(
+                    "match",
+                    hasValue && confirmation.value.length > 0 && value === confirmation.value
+                );
+                setRule("not-numeric", hasValue && !/^\\d+$/.test(value));
+            };
+
+            password.addEventListener("input", updatePolicy);
+            confirmation.addEventListener("input", updatePolicy);
+            updatePolicy();
+        }());
+    </script>
 {% endblock %}

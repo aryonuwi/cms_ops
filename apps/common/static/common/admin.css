@@ -180,7 +180,102 @@ body.change-form #content-main .tab-wrapper .help {
   margin-top: .25rem;
 }
 
+body.change-form #content-main .password-policy,
+body.change-form #content-main .password-reset-panel {
+  margin: .25rem .75rem .75rem;
+  padding: .75rem;
+  border: 1px solid var(--fx-line);
+  border-radius: 10px;
+  background: rgba(56, 189, 248, .06);
+}
+
+body.change-form #content-main .password-policy__heading {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  font-weight: 650;
+  color: var(--fx-sky);
+}
+
+body.change-form #content-main .password-policy__heading .material-symbols-outlined {
+  font-size: 1rem;
+}
+
+body.change-form #content-main .password-policy__note,
+body.change-form #content-main .password-reset-panel__help {
+  margin-top: .3rem;
+  color: rgb(100 116 139);
+  font-size: .75rem;
+  line-height: 1.35;
+}
+
+html.dark body.change-form #content-main .password-policy__note,
+html.dark body.change-form #content-main .password-reset-panel__help {
+  color: rgb(148 163 184);
+}
+
+body.change-form #content-main .password-policy__rules {
+  display: grid;
+  gap: .25rem;
+  margin-top: .55rem;
+}
+
+body.change-form #content-main .password-rule {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  color: rgb(100 116 139);
+  font-size: .75rem;
+  transition: color .15s ease;
+}
+
+body.change-form #content-main .password-rule__icon {
+  width: 1rem;
+  color: rgb(148 163 184);
+  font-size: .9rem;
+  text-align: center;
+}
+
+body.change-form #content-main .password-rule.is-valid {
+  color: rgb(22 163 74);
+}
+
+body.change-form #content-main .password-rule.is-valid .password-rule__icon {
+  color: rgb(22 163 74);
+  font-weight: 800;
+}
+
+body.change-form #content-main .password-rule--server {
+  color: rgb(37 99 235);
+}
+
+body.change-form #content-main .password-reset-panel {
+  background: rgba(168, 85, 247, .07);
+  border-color: rgba(168, 85, 247, .28);
+}
+
+body.change-form #content-main .password-reset-panel__button {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  color: rgb(126 34 206);
+  font-weight: 650;
+}
+
+body.change-form #content-main .password-reset-panel__button:hover {
+  color: rgb(107 33 168);
+}
+
+html.dark body.change-form #content-main .password-reset-panel__button {
+  color: rgb(216 180 254);
+}
+
+body.change-form #content-main .password-reset-panel__button .material-symbols-outlined {
+  font-size: 1rem;
+}
+
 @media (prefers-reduced-motion: reduce) {
   body.login .w-full.sm\:w-96 { animation: none; }
   body.login #login-form .submit-row { transition: none; }
+  body.change-form #content-main .password-rule { transition: none; }
 }

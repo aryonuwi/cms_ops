@@ -94,9 +94,17 @@ class UserAdminPasswordResetTests(TestCase):
             args=[self.target.pk],
         )
         change_url = reverse("admin:accounts_user_change", args=[self.target.pk])
+        list_url = reverse("admin:accounts_user_changelist")
+
+        list_page = self.client.get(list_url)
+        self.assertContains(list_page, url)
+        self.assertContains(list_page, "Kirim Link")
 
         change_page = self.client.get(change_url)
         self.assertContains(change_page, url)
+        self.assertContains(change_page, "Generate &amp; Kirim Link Reset Password")
+        self.assertContains(change_page, "data-password-policy")
+        self.assertContains(change_page, "Minimal 8 karakter")
         self.assertContains(change_page, "Aktivitas User")
 
         confirmation = self.client.get(url)

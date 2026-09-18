@@ -401,6 +401,30 @@ class FeatureGrantAdmin(SuperuserOnlyAdmin, BaseModelAdmin):
 
     def save_model(self, request, obj, form, change):
         # R5: through services.py
+        if change:
+            original = (
+                FeatureGrant.all_objects.select_related(
+                    "feature", "action", "group", "org_unit"
+                )
+                .filter(pk=obj.pk)
+                .first()
+            )
+            if original is not None:
+                identity_changed = any(
+                    (
+                        original.feature_id != obj.feature_id,
+                        original.action_id != obj.action_id,
+                        original.grantee_type != obj.grantee_type,
+                        original.group_id != obj.group_id,
+                        original.user_id != obj.user_id,
+                        original.org_unit_id != obj.org_unit_id,
+                    )
+                )
+                if identity_changed:
+                    # An edit that changes the grant target is a revoke plus a
+                    # new grant; otherwise the old decision would remain active.
+                    services.revoke_feature(grant=original)
+
         grant = services.grant_feature(
             feature=obj.feature,
             grantee_type=obj.grantee_type,
